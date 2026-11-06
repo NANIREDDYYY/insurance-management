@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Link,
@@ -342,11 +343,15 @@ function createInitialApplicationDetails() {
     familyMedicalHistory: '',
 
     registrationNumber: '',
+    ownerName: '',
     vehicleMake: '',
     vehicleModel: '',
     vehicleVariant: '',
     manufacturingYear: '',
     fuelType: '',
+    vehicleState: '',
+    vehicleRto: '',
+    insuranceValidity: '',
     vehicleUsage: '',
     previousInsurance: '',
     previousInsurer: '',
@@ -613,6 +618,7 @@ export default function BuyPolicy() {
   const [paymentReference, setPaymentReference] = useState(null)
 
   const paymentLock = useRef(false)
+  const rcRequestId = useRef(0)
 
   /* QUERIES */
 
@@ -865,22 +871,20 @@ export default function BuyPolicy() {
     })
   }, [isRenewal, originalPurchase])
 
-  /* VEHICLE RC VERIFICATION */
+  /* =========================================================
+     AUTOMATIC VEHICLE RC VERIFICATION
+  ========================================================= */
 
-  async function verifyVehicleRegistration() {
+  async function verifyVehicleRegistration(registrationValue) {
     const registrationNumber = normalizeRegistration(
-      applicationDetails.registrationNumber,
+      registrationValue,
     )
 
     if (!/^[A-Z0-9]{6,15}$/.test(registrationNumber)) {
-      setRcVerification({
-        loading: false,
-        verifiedRegistration: '',
-        result: null,
-        error: 'Enter a valid vehicle registration number.',
-      })
       return
     }
+
+    const requestId = ++rcRequestId.current
 
     setRcVerification({
       loading: true,
@@ -894,13 +898,16 @@ export default function BuyPolicy() {
         registrationNumber,
       )
 
+      // Ignore an older request if the registration number changed.
+      if (requestId !== rcRequestId.current) return
+
       if (
         !response ||
         String(response.status ?? '').toLowerCase() !== 'success'
       ) {
         throw new Error(
           response?.message ||
-          'Vehicle verification was unsuccessful.',
+          'Vehicle details could not be retrieved.',
         )
       }
 
@@ -910,28 +917,37 @@ export default function BuyPolicy() {
 
       if (verifiedNumber !== registrationNumber) {
         throw new Error(
-          'The returned registration number does not match your input.',
+          'The returned registration number does not match.',
         )
       }
 
-      const vehicleDescription = String(
-        response.vehicle || '',
-      ).trim()
-
-      const returnedFuel = String(
-        response.fuel || '',
-      ).trim()
+      const vehicle = String(response.vehicle || '').trim()
+      const owner = String(response.ownerName || '').trim()
+      const fuel = String(response.fuel || '').trim()
+      const state = String(response.state || '').trim()
+      const rto = String(response.rto || '').trim()
 
       const matchingFuel = FUEL_TYPES.find(
-        (fuel) =>
-          fuel.toLowerCase() === returnedFuel.toLowerCase(),
+        (item) =>
+          item.toLowerCase() === fuel.toLowerCase(),
       )
 
       setApplicationDetails((current) => ({
         ...current,
-        registrationNumber: verifiedNumber,
-        vehicleModel: vehicleDescription || current.vehicleModel,
+
+        // Only fill information actually returned by API Express.
+        ownerName: owner || current.ownerName,
+        vehicleModel: vehicle || current.vehicleModel,
         fuelType: matchingFuel || current.fuelType,
+        vehicleState: state || current.vehicleState,
+        vehicleRto: rto || current.vehicleRto,
+
+        insuranceValidity:
+          typeof response.insuranceValid === 'boolean'
+            ? response.insuranceValid
+              ? 'Valid'
+              : 'Not valid'
+            : current.insuranceValidity,
       }))
 
       setRcVerification({
@@ -941,30 +957,66 @@ export default function BuyPolicy() {
         error: '',
       })
 
-      setErrors((current) => ({
-        ...current,
-        registrationNumber: '',
-        vehicleVerification: '',
-      }))
     } catch (verificationError) {
+      if (requestId !== rcRequestId.current) return
+
       setRcVerification({
         loading: false,
         verifiedRegistration: '',
         result: null,
         error: errorMessage(
           verificationError,
-          'Unable to verify this vehicle. Please try again.',
+          'Unable to retrieve vehicle details. You can enter them manually.',
         ),
       })
     }
   }
+
+  /* =========================================================
+     AUTOMATIC LOOKUP AFTER CUSTOMER STOPS TYPING
+  ========================================================= */
+
+  useEffect(() => {
+    if (planCategory !== 'MOTOR') return
+
+    const registrationNumber = normalizeRegistration(
+      applicationDetails.registrationNumber,
+    )
+
+    if (!/^[A-Z0-9]{6,15}$/.test(registrationNumber)) {
+      rcRequestId.current += 1
+
+      setRcVerification({
+        loading: false,
+        verifiedRegistration: '',
+        result: null,
+        error: '',
+      })
+
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      verifyVehicleRegistration(registrationNumber)
+    }, 700)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+      rcRequestId.current += 1
+    }
+  }, [
+    applicationDetails.registrationNumber,
+    planCategory,
+  ])
 
   /* APPLICATION STATE HELPERS */
 
   function updateApplicationField(name, value) {
     setApplicationDetails((current) => ({
       ...current,
-      [name]: value,
+      [name]: name === 'registrationNumber'
+        ? value.toUpperCase()
+        : value,
     }))
 
     setErrors((current) => ({
@@ -976,6 +1028,8 @@ export default function BuyPolicy() {
     }))
 
     if (name === 'registrationNumber') {
+      rcRequestId.current += 1
+
       setRcVerification({
         loading: false,
         verifiedRegistration: '',
@@ -1013,7 +1067,9 @@ export default function BuyPolicy() {
     )
   }
 
-  /* VALIDATION */
+  /* =========================================================
+     VALIDATION
+  ========================================================= */
 
   function validateApplication() {
     const nextErrors = {}
@@ -1151,17 +1207,8 @@ export default function BuyPolicy() {
           'Enter the vehicle registration number.'
       }
 
-      const currentRegistration = normalizeRegistration(
-        details.registrationNumber,
-      )
-
-      if (
-        !rcVerification.verifiedRegistration ||
-        rcVerification.verifiedRegistration !== currentRegistration
-      ) {
-        nextErrors.vehicleVerification =
-          'Please verify your vehicle registration number before continuing.'
-      }
+      // RC verification is optional.
+      // Customers can manually complete missing vehicle information.
 
       if (!details.vehicleMake.trim()) {
         nextErrors.vehicleMake = 'Enter the vehicle make.'
@@ -1285,7 +1332,9 @@ export default function BuyPolicy() {
     return Object.keys(nextErrors).length === 0
   }
 
-  /* RAZORPAY CHECKOUT */
+  /* =========================================================
+     RAZORPAY CHECKOUT
+  ========================================================= */
 
   async function openCheckout(order) {
     const Razorpay = await loadRazorpay()
@@ -1348,7 +1397,9 @@ export default function BuyPolicy() {
     })
   }
 
-  /* CACHE SYNCHRONIZATION */
+  /* =========================================================
+     CACHE SYNCHRONIZATION
+  ========================================================= */
 
   async function refreshRelatedData() {
     await Promise.all([
@@ -1359,7 +1410,9 @@ export default function BuyPolicy() {
     ])
   }
 
-  /* PAYMENT */
+  /* =========================================================
+     PAYMENT
+  ========================================================= */
 
   async function pay() {
     if (paying || paymentLock.current || paymentUncertain || done) {
@@ -1588,7 +1641,9 @@ export default function BuyPolicy() {
     }
   }
 
-  /* SUCCESS */
+  /* =========================================================
+     SUCCESS
+  ========================================================= */
 
   if (done) {
     return (
@@ -1670,7 +1725,9 @@ export default function BuyPolicy() {
     )
   }
 
-  /* QUERY STATUS */
+  /* =========================================================
+     QUERY STATUS
+  ========================================================= */
 
   const currentQuery = isRenewal
     ? {
@@ -1692,13 +1749,21 @@ export default function BuyPolicy() {
       }
     : list
 
-  /* APPLICATION FORM RENDERER */
+  /* =========================================================
+     APPLICATION FORM RENDERER
+  ========================================================= */
 
   function renderApplicationField(field) {
     if (field.name === 'registrationNumber') {
-      const isVerified =
-        rcVerification.verifiedRegistration ===
-        normalizeRegistration(applicationDetails.registrationNumber)
+      const currentRegistration = normalizeRegistration(
+        applicationDetails.registrationNumber,
+      )
+
+      const isVerified = Boolean(
+        currentRegistration &&
+        rcVerification.verifiedRegistration === currentRegistration &&
+        rcVerification.result
+      )
 
       return (
         <div
@@ -1709,175 +1774,63 @@ export default function BuyPolicy() {
             marginBottom: '15px',
           }}
         >
+          <ApplicationField
+            {...field}
+            value={applicationDetails.registrationNumber}
+            onChange={updateApplicationField}
+            error={errors.registrationNumber}
+            disabled={paying}
+          />
+
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) auto',
-              alignItems: 'end',
-              gap: '10px',
+              marginTop: '5px',
+              fontSize: '12px',
+              color: '#65776c',
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <ApplicationField
-                {...field}
-                value={applicationDetails[field.name]}
-                onChange={updateApplicationField}
-                error={errors[field.name]}
-                disabled={rcVerification.loading || paying}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={verifyVehicleRegistration}
-              disabled={
-                rcVerification.loading ||
-                paying ||
-                !applicationDetails.registrationNumber.trim()
-              }
-              style={{
-                minHeight: '42px',
-                padding: '10px 16px',
-                border: 'none',
-                borderRadius: '9px',
-                background: isVerified ? '#e5f5eb' : '#176b43',
-                color: isVerified ? '#176b43' : '#fff',
-                fontSize: '13px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                opacity: rcVerification.loading ? 0.7 : 1,
-              }}
-            >
-              {rcVerification.loading
-                ? 'Verifying...'
-                : isVerified
-                  ? '✓ Verified'
-                  : 'Verify RC'}
-            </button>
+            {rcVerification.loading ? (
+              <span style={{ color: '#176b43' }}>
+                Checking registration details automatically...
+              </span>
+            ) : isVerified ? (
+              <span style={{ color: '#176b43', fontWeight: 600 }}>
+                ✓ RC details retrieved successfully.
+              </span>
+            ) : rcVerification.error ? (
+              <span style={{ color: '#b42318' }}>
+                {rcVerification.error} Enter the vehicle details manually.
+              </span>
+            ) : (
+              <span>
+                Enter your registration number. Available vehicle details
+                will be filled automatically.
+              </span>
+            )}
           </div>
-
-          {errors.vehicleVerification && (
-            <span style={errorStyle}>
-              {errors.vehicleVerification}
-            </span>
-          )}
-
-          {rcVerification.error && (
-            <div
-              role="alert"
-              style={{
-                marginTop: '9px',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: '#fff0ef',
-                color: '#b42318',
-                fontSize: '13px',
-              }}
-            >
-              {rcVerification.error}
-            </div>
-          )}
 
           {isVerified && rcVerification.result && (
             <div
               style={{
                 marginTop: '12px',
-                padding: '14px',
+                padding: '12px 14px',
                 border: '1px solid #c9e7d3',
-                borderRadius: '10px',
+                borderRadius: '9px',
                 background: '#f4fbf6',
+                color: '#176b43',
+                fontSize: '13px',
               }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '8px',
-                  marginBottom: '12px',
-                }}
-              >
-                <strong style={{ color: '#176b43', fontSize: '14px' }}>
-                  Vehicle verification successful
-                </strong>
-
-                <span
-                  style={{
-                    padding: '4px 9px',
-                    borderRadius: '20px',
-                    background: '#e0f2e6',
-                    color: '#176b43',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                  }}
-                >
-                  RC VERIFIED
-                </span>
-              </div>
-
-              <div style={applicationGridStyle}>
-                {[
-                  [
-                    'Registration number',
-                    rcVerification.result.registrationNumber,
-                  ],
-                  ['Owner name', rcVerification.result.ownerName],
-                  ['Vehicle', rcVerification.result.vehicle],
-                  ['Fuel', rcVerification.result.fuel],
-                  ['State', rcVerification.result.state],
-                  ['RTO', rcVerification.result.rto],
-                  [
-                    'Insurance status',
-                    typeof rcVerification.result.insuranceValid === 'boolean'
-                      ? rcVerification.result.insuranceValid
-                        ? 'Valid according to provider'
-                        : 'Not valid according to provider'
-                      : 'Not available',
-                  ],
-                ]
-                  .filter(([, value]) =>
-                    value !== null &&
-                    value !== undefined &&
-                    String(value).trim() !== '',
-                  )
-                  .map(([label, value]) => (
-                    <div key={label} style={{ marginBottom: '9px' }}>
-                      <span
-                        style={{
-                          display: 'block',
-                          color: '#718278',
-                          fontSize: '11px',
-                          marginBottom: '3px',
-                        }}
-                      >
-                        {label}
-                      </span>
-
-                      <strong
-                        style={{
-                          color: '#263d31',
-                          fontSize: '13px',
-                          overflowWrap: 'anywhere',
-                        }}
-                      >
-                        {String(value)}
-                      </strong>
-                    </div>
-                  ))}
-              </div>
+              <strong>RC information retrieved</strong>
 
               <p
                 style={{
-                  margin: '8px 0 0',
-                  fontSize: '11px',
-                  color: '#65776c',
+                  margin: '5px 0 0',
+                  color: '#52675a',
                 }}
               >
-                Vehicle information is provided by the RC verification
-                service. Please check the remaining application details
-                before continuing.
+                Available information has been populated below.
+                Please review it and complete any blank fields manually.
               </p>
             </div>
           )}
@@ -1895,6 +1848,10 @@ export default function BuyPolicy() {
       />
     )
   }
+
+  /* =========================================================
+     APPLICATION FORM
+  ========================================================= */
 
   function renderApplicationForm() {
     if (planCategory === 'HEALTH') {
@@ -2099,6 +2056,11 @@ export default function BuyPolicy() {
           required: true,
         },
         {
+          name: 'ownerName',
+          label: 'Registered owner name',
+          placeholder: 'Auto-filled when available',
+        },
+        {
           name: 'vehicleMake',
           label: 'Vehicle make / manufacturer',
           placeholder: 'e.g. Maruti Suzuki',
@@ -2107,13 +2069,13 @@ export default function BuyPolicy() {
         {
           name: 'vehicleModel',
           label: 'Vehicle model',
-          placeholder: 'e.g. Swift',
+          placeholder: 'Auto-filled when available, or enter manually',
           required: true,
         },
         {
           name: 'vehicleVariant',
           label: 'Vehicle variant',
-          placeholder: 'Optional',
+          placeholder: 'Enter vehicle variant',
         },
         {
           name: 'manufacturingYear',
@@ -2129,6 +2091,21 @@ export default function BuyPolicy() {
           type: 'select',
           options: FUEL_TYPES,
           required: true,
+        },
+        {
+          name: 'vehicleState',
+          label: 'Registration state',
+          placeholder: 'Auto-filled when available',
+        },
+        {
+          name: 'vehicleRto',
+          label: 'RTO',
+          placeholder: 'Auto-filled when available',
+        },
+        {
+          name: 'insuranceValidity',
+          label: 'Existing insurance validity',
+          placeholder: 'Auto-filled when available',
         },
         {
           name: 'vehicleUsage',
@@ -2182,7 +2159,11 @@ export default function BuyPolicy() {
         <>
           <div style={sectionHeadingStyle}>
             <strong>Vehicle information</strong>
-            <span>Motor insurance application</span>
+            <span>
+              Enter your registration number to retrieve available
+              vehicle information automatically. Complete any missing
+              details manually.
+            </span>
           </div>
 
           <div style={applicationGridStyle}>
@@ -2198,6 +2179,10 @@ export default function BuyPolicy() {
       </div>
     )
   }
+
+  /* =========================================================
+     FAMILY MEMBERS
+  ========================================================= */
 
   function renderFamilyMembers() {
     return (
@@ -2340,7 +2325,9 @@ export default function BuyPolicy() {
     )
   }
 
-  /* APPLICATION REVIEW */
+  /* =========================================================
+     APPLICATION REVIEW
+  ========================================================= */
 
   function renderApplicationReview() {
     const excludedKeys = new Set([
@@ -2422,7 +2409,9 @@ export default function BuyPolicy() {
     )
   }
 
-  /* NAVIGATION VALIDATION */
+  /* =========================================================
+     NAVIGATION VALIDATION
+  ========================================================= */
 
   function continueStep() {
     setError('')
@@ -2457,7 +2446,9 @@ export default function BuyPolicy() {
     }
   }
 
-  /* RENDER */
+  /* =========================================================
+     RENDER
+  ========================================================= */
 
   return (
     <div className="ix-buy-page">
@@ -2676,12 +2667,14 @@ export default function BuyPolicy() {
 
                   {!isRenewal && step === 1 && (
                     <Panel title="Insurance application details">
-                      <p style={{
-                        color: '#617267',
-                        fontSize: '13px',
-                        marginTop: 0,
-                        marginBottom: '20px',
-                      }}>
+                      <p
+                        style={{
+                          color: '#617267',
+                          fontSize: '13px',
+                          marginTop: 0,
+                          marginBottom: '20px',
+                        }}
+                      >
                         Complete the information required for your selected
                         {` ${planCategory.toLowerCase()} `}insurance plan.
                         Fields marked with * are required.
