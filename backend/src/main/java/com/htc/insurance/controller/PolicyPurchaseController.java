@@ -33,7 +33,7 @@ public class PolicyPurchaseController {
     @PostMapping("/purchase")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<PurchasePolicyDto> purchasePolicy(
-            @RequestBody PurchasePolicyDto purchaseDto,
+            @Valid @RequestBody PurchasePolicyDto purchaseDto,
             Authentication authentication) {
 
         if (purchaseDto == null) {
