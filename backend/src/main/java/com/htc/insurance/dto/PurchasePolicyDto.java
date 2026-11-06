@@ -4,13 +4,16 @@ package com.htc.insurance.dto;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * Purchase, renewal, payment and refund transfer object.
+ * Purchase, renewal, payment, refund and insurance
+ * application details transfer object.
  */
 @Getter
 @Setter
@@ -48,6 +51,49 @@ public class PurchasePolicyDto {
     private String nomineeName;
     private String nomineeRelation;
     private String nomineeContact;
+
+    // =========================================================
+    // INSURANCE APPLICATION DETAILS
+    //
+    // Flexible structure for plan-specific information:
+    //
+    // HEALTH:
+    // applicant, dateOfBirth, gender, occupation,
+    // medicalHistory, existingConditions, address
+    //
+    // FAMILY:
+    // primaryApplicant, familyMembers, address
+    //
+    // VEHICLE:
+    // vehicleRegistrationNumber, vehicleType,
+    // registrationDetails, vehicleOwner, vehicleUsage
+    //
+    // OTHER PLANS:
+    // Additional plan-specific application information.
+    //
+    // Vehicle lookup data must be verified by the backend.
+    // Never trust frontend-supplied vehicle verification status.
+    // =========================================================
+
+    private Map<String, Object> applicationDetails;
+
+    // =========================================================
+    // FAMILY MEMBER INFORMATION
+    // =========================================================
+
+    private List<FamilyMemberDto> familyMembers;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class FamilyMemberDto {
+
+        private String name;
+        private String relation;
+        private LocalDate dateOfBirth;
+        private String gender;
+        private String occupation;
+    }
 
     // =========================================================
     // PAYMENT METHOD
