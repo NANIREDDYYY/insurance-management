@@ -1,6 +1,8 @@
 
 package com.htc.insurance.service;
 
+import java.net.InetAddress;
+import java.net.URI;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -31,13 +33,16 @@ public class VehicleVerificationService {
 
     private final RestClient restClient;
     private final String apiKey;
+    private final String baseUrl;
 
     public VehicleVerificationService(
             RestClient apiExpressRestClient,
-            @Value("${apiexpress.api-key:}") String apiKey) {
+            @Value("${apiexpress.api-key:}") String apiKey,
+            @Value("${apiexpress.base-url:https://api.apiexpress.in}") String baseUrl) {
 
         this.restClient = apiExpressRestClient;
         this.apiKey = apiKey;
+        this.baseUrl = baseUrl;
     }
 
     public VehicleVerificationResponse verify(String registrationNumber) {
@@ -63,6 +68,8 @@ public class VehicleVerificationService {
         try {
 
             log.info("Starting vehicle verification for registration: {}", rcNumber);
+
+            diagnoseApiExpressDns();
 
             JsonNode response = restClient.post()
                     .uri("/v1/rc/verify")
@@ -111,7 +118,10 @@ public class VehicleVerificationService {
                             textOrNull(response, "rto")
                     );
 
-            log.info("Vehicle verification completed for registration: {}", rcNumber);
+            log.info(
+                    "Vehicle verification completed for registration: {}",
+                    rcNumber
+            );
 
             return result;
 
@@ -129,8 +139,6 @@ public class VehicleVerificationService {
 
         } catch (ResourceAccessException exception) {
 
-            // Print the complete exception and underlying cause.
-            // Authorization headers and API keys are not logged.
             log.error(
                     "API Express connection failed. Full exception details:",
                     exception
@@ -168,6 +176,41 @@ public class VehicleVerificationService {
         }
     }
 
+    /**
+     * Diagnoses the configured API Express hostname.
+     * Does not log API keys or authorization headers.
+     */
+    private void diagnoseApiExpressDns() {
+
+        try {
+
+            String host = URI.create(baseUrl.trim()).getHost();
+
+            if (host == null || host.isBlank()) {
+                log.error("Invalid API Express base URL configuration");
+                return;
+            }
+
+            log.info("API Express configured hostname: {}", host);
+
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+
+            for (InetAddress address : addresses) {
+                log.info(
+                        "API Express resolved IP: {}",
+                        address.getHostAddress()
+                );
+            }
+
+        } catch (Exception exception) {
+
+            log.error(
+                    "API Express hostname diagnostic failed",
+                    exception
+            );
+        }
+    }
+
     private String normalizeRegistrationNumber(String value) {
 
         if (value == null) {
@@ -197,29 +240,10 @@ public class VehicleVerificationService {
 
         JsonNode value = response.get(field);
 
-        if (value == null || value.isNull()
-                || !value.isBoolean()) {
+        if (value == null || value.isNull() || !value.isBoolean()) {
             return null;
         }
 
         return value.booleanValue();
     }
-
-    
-private void diagnoseApiExpressDns() {
-    try {
-        java.net.InetAddress[] addresses =
-                java.net.InetAddress.getAllByName("api.apiexpress.in");
-
-        for (java.net.InetAddress address : addresses) {
-            log.info("API Express DNS resolved to: {}", address.getHostAddress());
-        }
-
-    } catch (Exception exception) {
-        log.error("API Express DNS resolution failed", exception);
-    }
 }
-
-}
-
-
