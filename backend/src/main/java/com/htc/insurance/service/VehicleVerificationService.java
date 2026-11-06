@@ -117,7 +117,6 @@ public class VehicleVerificationService {
 
         } catch (RestClientResponseException exception) {
 
-            // Do not log provider response bodies or authorization headers.
             log.error(
                     "API Express HTTP error. Provider HTTP status: {}",
                     exception.getStatusCode()
@@ -130,9 +129,19 @@ public class VehicleVerificationService {
 
         } catch (ResourceAccessException exception) {
 
+            // Print the complete exception and underlying cause.
+            // Authorization headers and API keys are not logged.
             log.error(
-                    "API Express connection or timeout error: {}",
-                    exception.getClass().getSimpleName()
+                    "API Express connection failed. Full exception details:",
+                    exception
+            );
+
+            Throwable cause = exception.getMostSpecificCause();
+
+            log.error(
+                    "API Express root cause: {} - {}",
+                    cause.getClass().getName(),
+                    cause.getMessage()
             );
 
             throw new ResponseStatusException(
@@ -146,8 +155,6 @@ public class VehicleVerificationService {
 
         } catch (Exception exception) {
 
-            // Log the exception for Render diagnostics.
-            // Never log API keys or authorization headers.
             log.error(
                     "Unexpected vehicle verification error. Exception type: {}",
                     exception.getClass().getName(),
