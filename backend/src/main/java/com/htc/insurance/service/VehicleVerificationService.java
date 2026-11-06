@@ -6,6 +6,8 @@ import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -20,6 +22,9 @@ import com.htc.insurance.dto.VehicleVerificationResponse;
 
 @Service
 public class VehicleVerificationService {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(VehicleVerificationService.class);
 
     private static final Pattern RC_PATTERN =
             Pattern.compile("^[A-Z0-9]{6,15}$");
@@ -47,6 +52,8 @@ public class VehicleVerificationService {
         }
 
         if (apiKey == null || apiKey.isBlank()) {
+            log.error("API Express configuration is missing: API key not configured");
+
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "Vehicle verification is not configured"
@@ -54,6 +61,8 @@ public class VehicleVerificationService {
         }
 
         try {
+
+            log.info("Starting vehicle verification for registration: {}", rcNumber);
 
             JsonNode response = restClient.post()
                     .uri("/v1/rc/verify")
@@ -67,9 +76,22 @@ public class VehicleVerificationService {
                     .retrieve()
                     .body(JsonNode.class);
 
-            if (response == null
-                    || !"success".equalsIgnoreCase(
-                            response.path("status").asText())) {
+            if (response == null) {
+                log.error("API Express returned an empty response");
+
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Vehicle verification provider returned an empty response"
+                );
+            }
+
+            String providerStatus = response.path("status").asText();
+
+            if (!"success".equalsIgnoreCase(providerStatus)) {
+                log.warn(
+                        "Vehicle verification unsuccessful for registration: {}",
+                        rcNumber
+                );
 
                 throw new ResponseStatusException(
                         HttpStatus.UNPROCESSABLE_ENTITY,
@@ -77,20 +99,30 @@ public class VehicleVerificationService {
                 );
             }
 
-            return new VehicleVerificationResponse(
-                    "success",
-                    rcNumber,
-                    textOrNull(response, "owner_name"),
-                    textOrNull(response, "vehicle"),
-                    textOrNull(response, "fuel"),
-                    booleanOrNull(response, "insurance_valid"),
-                    textOrNull(response, "state"),
-                    textOrNull(response, "rto")
-            );
+            VehicleVerificationResponse result =
+                    new VehicleVerificationResponse(
+                            "success",
+                            rcNumber,
+                            textOrNull(response, "owner_name"),
+                            textOrNull(response, "vehicle"),
+                            textOrNull(response, "fuel"),
+                            booleanOrNull(response, "insurance_valid"),
+                            textOrNull(response, "state"),
+                            textOrNull(response, "rto")
+                    );
+
+            log.info("Vehicle verification completed for registration: {}", rcNumber);
+
+            return result;
 
         } catch (RestClientResponseException exception) {
 
-            // Do not return the provider response or API key to the customer.
+            // Do not log provider response bodies or authorization headers.
+            log.error(
+                    "API Express HTTP error. Provider HTTP status: {}",
+                    exception.getStatusCode()
+            );
+
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "Vehicle verification provider returned an error"
@@ -98,11 +130,34 @@ public class VehicleVerificationService {
 
         } catch (ResourceAccessException exception) {
 
+            log.error(
+                    "API Express connection or timeout error: {}",
+                    exception.getClass().getSimpleName()
+            );
+
             throw new ResponseStatusException(
                     HttpStatus.GATEWAY_TIMEOUT,
                     "Vehicle verification service timed out. Please try again."
             );
 
+        } catch (ResponseStatusException exception) {
+
+            throw exception;
+
+        } catch (Exception exception) {
+
+            // Log the exception for Render diagnostics.
+            // Never log API keys or authorization headers.
+            log.error(
+                    "Unexpected vehicle verification error. Exception type: {}",
+                    exception.getClass().getName(),
+                    exception
+            );
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Unable to verify vehicle details currently. Please try again."
+            );
         }
     }
 
