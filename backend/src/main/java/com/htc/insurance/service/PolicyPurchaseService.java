@@ -54,8 +54,16 @@ public class PolicyPurchaseService {
     private static final BigDecimal MAXIMUM_COVERAGE =
             new BigDecimal("10000000.00");
 
-    private static final BigDecimal GST_RATE =
-            new BigDecimal("0.00");
+    private static final BigDecimal LONG_TERM_DISCOUNT =
+            new BigDecimal("0.05");
+
+    private static final BigDecimal MOTOR_GST_RATE =
+            new BigDecimal("0.18");
+
+    private static final BigDecimal ZERO =
+            BigDecimal.ZERO.setScale(
+                    2,
+                    RoundingMode.HALF_UP);
 
     private static final long REFUND_WINDOW_HOURS = 24;
 
@@ -531,8 +539,7 @@ public class PolicyPurchaseService {
                 || dto.getDurationYears() > 5) {
 
             throw new IllegalArgumentException(
-                    "Policy duration must be between "
-                    + "1 and 5 years.");
+                    "Policy duration must be between 1 and 5 years.");
         }
 
         if (isBlank(dto.getRazorpayOrderId())
@@ -639,7 +646,7 @@ public class PolicyPurchaseService {
 
     // =========================================================
     // PREMIUM CALCULATION
-    // Matches the shared PaymentService pricing rules
+    // Matches PaymentService exactly
     // =========================================================
 
     private PremiumBreakdown calculatePremium(
@@ -647,7 +654,8 @@ public class PolicyPurchaseService {
             BigDecimal coverage,
             Integer durationYears) {
 
-        if (plan.getBaseCoverage() == null
+        if (plan == null
+                || plan.getBaseCoverage() == null
                 || plan.getBaseCoverage()
                         .compareTo(BigDecimal.ZERO) <= 0
                 || plan.getBasePremium() == null
@@ -658,9 +666,21 @@ public class PolicyPurchaseService {
                     "Insurance plan pricing is invalid.");
         }
 
+        if (durationYears == null
+                || durationYears < 1
+                || durationYears > 5) {
+
+            throw new IllegalArgumentException(
+                    "Policy duration must be between 1 and 5 years.");
+        }
+
+        BigDecimal minimumCoverage = plan.getBaseCoverage();
+        BigDecimal maximumCoverage =
+                MAXIMUM_COVERAGE.max(minimumCoverage);
+
         if (coverage == null
-                || coverage.compareTo(plan.getBaseCoverage()) < 0
-                || coverage.compareTo(MAXIMUM_COVERAGE) > 0) {
+                || coverage.compareTo(minimumCoverage) < 0
+                || coverage.compareTo(maximumCoverage) > 0) {
 
             throw new IllegalArgumentException(
                     "Coverage is outside the selected plan's allowed range.");
@@ -676,15 +696,25 @@ public class PolicyPurchaseService {
                 .multiply(BigDecimal.valueOf(durationYears))
                 .setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal discountAmount = BigDecimal.ZERO
-                .setScale(2, RoundingMode.HALF_UP);
+        // Apply the same long-term discount as PaymentService.
+        BigDecimal discountAmount = ZERO;
+
+        if (durationYears >= 2) {
+
+            discountAmount = basePremium
+                    .multiply(LONG_TERM_DISCOUNT)
+                    .setScale(2, RoundingMode.HALF_UP);
+        }
 
         BigDecimal taxableAmount = basePremium
                 .subtract(discountAmount)
                 .setScale(2, RoundingMode.HALF_UP);
 
+        // Apply GST after discount.
+        BigDecimal gstRate = getGstRate(plan);
+
         BigDecimal gstAmount = taxableAmount
-                .multiply(GST_RATE)
+                .multiply(gstRate)
                 .setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal totalPremium = taxableAmount
@@ -695,9 +725,43 @@ public class PolicyPurchaseService {
                 basePremium,
                 discountAmount,
                 taxableAmount,
-                GST_RATE,
+                gstRate,
                 gstAmount,
                 totalPremium);
+    }
+
+    // =========================================================
+    // GST CLASSIFICATION
+    // Must match PaymentService
+    // =========================================================
+
+    private BigDecimal getGstRate(InsurancePlan plan) {
+
+        if (plan == null
+                || plan.getPlanCode() == null
+                || plan.getPlanCode().isBlank()) {
+
+            throw new IllegalStateException(
+                    "GST classification is unavailable for this plan.");
+        }
+
+        String planCode = plan.getPlanCode()
+                .trim()
+                .toUpperCase(java.util.Locale.ROOT);
+
+        if (planCode.startsWith("HLT-")
+                || planCode.startsWith("LIF-")) {
+
+            return ZERO;
+        }
+
+        if (planCode.startsWith("MTR-")) {
+            return MOTOR_GST_RATE;
+        }
+
+        throw new IllegalStateException(
+                "GST classification is not configured for plan: "
+                + planCode);
     }
 
     // =========================================================
@@ -732,14 +796,9 @@ public class PolicyPurchaseService {
 
         if (policy != null) {
 
-            dto.setPolicyNumber(
-                    policy.getPolicyNumber());
-
-            dto.setCoveredTypes(
-                    policy.getCoveredTypes());
-
-            dto.setDurationYears(
-                    policy.getDurationYears());
+            dto.setPolicyNumber(policy.getPolicyNumber());
+            dto.setCoveredTypes(policy.getCoveredTypes());
+            dto.setDurationYears(policy.getDurationYears());
 
             if (policy.getPolicyHolder() != null
                     && policy.getPolicyHolder().getUser() != null) {
@@ -751,101 +810,47 @@ public class PolicyPurchaseService {
             }
         }
 
-        dto.setCoverageAmount(
-                purchase.getCoverageAmount());
+        dto.setCoverageAmount(purchase.getCoverageAmount());
 
-        dto.setNomineeName(
-                purchase.getNomineeName());
+        dto.setNomineeName(purchase.getNomineeName());
+        dto.setNomineeRelation(purchase.getNomineeRelation());
+        dto.setNomineeContact(purchase.getNomineeContact());
 
-        dto.setNomineeRelation(
-                purchase.getNomineeRelation());
-
-        dto.setNomineeContact(
-                purchase.getNomineeContact());
-
-        // =====================================================
-        // APPLICATION DETAILS
-        // =====================================================
-
+        // Application details.
         dto.setApplicationDetails(
                 copyApplicationDetails(
                         purchase.getApplicationDetails()));
 
-        // =====================================================
-        // FAMILY MEMBERS
-        // =====================================================
-
+        // Family members.
         dto.setFamilyMembers(
                 toFamilyMemberDtos(
                         purchase.getFamilyMembers()));
 
-        // =====================================================
-        // PAYMENT DETAILS
-        // =====================================================
+        // Payment details.
+        dto.setPaymentMethod(purchase.getPaymentMethod());
+        dto.setPaymentStatus(purchase.getPaymentStatus());
+        dto.setTransactionId(purchase.getTransactionId());
+        dto.setRazorpayOrderId(purchase.getRazorpayOrderId());
+        dto.setRazorpayPaymentId(purchase.getRazorpayPaymentId());
 
-        dto.setPaymentMethod(
-                purchase.getPaymentMethod());
+        dto.setBasePremium(purchase.getBasePremium());
+        dto.setDiscountAmount(purchase.getDiscountAmount());
+        dto.setTaxableAmount(purchase.getTaxableAmount());
+        dto.setGstRate(purchase.getGstRate());
+        dto.setGstAmount(purchase.getGstAmount());
+        dto.setTotalPremium(purchase.getTotalPremium());
 
-        dto.setPaymentStatus(
-                purchase.getPaymentStatus());
+        dto.setPaymentDate(purchase.getPaymentDate());
+        dto.setPaymentDateTime(purchase.getPaymentDateTime());
+        dto.setPurchaseDate(purchase.getPurchaseDate());
+        dto.setCreatedAt(purchase.getCreatedAt());
 
-        dto.setTransactionId(
-                purchase.getTransactionId());
-
-        dto.setRazorpayOrderId(
-                purchase.getRazorpayOrderId());
-
-        dto.setRazorpayPaymentId(
-                purchase.getRazorpayPaymentId());
-
-        dto.setBasePremium(
-                purchase.getBasePremium());
-
-        dto.setDiscountAmount(
-                purchase.getDiscountAmount());
-
-        dto.setTaxableAmount(
-                purchase.getTaxableAmount());
-
-        dto.setGstRate(
-                purchase.getGstRate());
-
-        dto.setGstAmount(
-                purchase.getGstAmount());
-
-        dto.setTotalPremium(
-                purchase.getTotalPremium());
-
-        dto.setPaymentDate(
-                purchase.getPaymentDate());
-
-        dto.setPaymentDateTime(
-                purchase.getPaymentDateTime());
-
-        dto.setPurchaseDate(
-                purchase.getPurchaseDate());
-
-        dto.setCreatedAt(
-                purchase.getCreatedAt());
-
-        // =====================================================
-        // REFUND DETAILS
-        // =====================================================
-
-        dto.setRefundStatus(
-                purchase.getRefundStatus());
-
-        dto.setRefundId(
-                purchase.getRefundId());
-
-        dto.setRefundAmount(
-                purchase.getRefundAmount());
-
-        dto.setRefundReason(
-                purchase.getRefundReason());
-
-        dto.setRefundDateTime(
-                purchase.getRefundDateTime());
+        // Refund details.
+        dto.setRefundStatus(purchase.getRefundStatus());
+        dto.setRefundId(purchase.getRefundId());
+        dto.setRefundAmount(purchase.getRefundAmount());
+        dto.setRefundReason(purchase.getRefundReason());
+        dto.setRefundDateTime(purchase.getRefundDateTime());
 
         LocalDateTime paidAt = purchase.getPaymentDateTime();
 
@@ -868,7 +873,8 @@ public class PolicyPurchaseService {
                 && "NOT_REFUNDED".equalsIgnoreCase(refundStatus)
                 && !isBlank(purchase.getRazorpayPaymentId())
                 && purchase.getTotalPremium() != null
-                && purchase.getTotalPremium().compareTo(BigDecimal.ZERO) > 0
+                && purchase.getTotalPremium().compareTo(
+                        BigDecimal.ZERO) > 0
                 && !refundAttemptRepository.existsByPurchaseId(
                         purchase.getPurchaseId())
                 && !claimsDao.existsClaimsByPolicyNumber(
@@ -991,10 +997,13 @@ public class PolicyPurchaseService {
 
         try {
             return LocalDate.parse(String.valueOf(value));
+
         } catch (RuntimeException ex) {
+
             log.warn(
                     "Could not convert stored family member date of birth: {}",
                     value);
+
             return null;
         }
     }
