@@ -1,4 +1,3 @@
-
 // =========================================================
 // INSUREX — BUY POLICY / RENEW POLICY
 // File: BuyPolicy.jsx
@@ -170,8 +169,7 @@ function getPlanGstRate(plan) {
     return MOTOR_GST_RATE
   }
 
-  // Match the backend's fail-closed classification.
-  // Unknown plan codes must not receive an invented GST rate.
+  // Unknown plan codes are not assigned an invented GST rate.
   return null
 }
 
@@ -201,28 +199,28 @@ function calculatePremium(plan, coverage, years) {
     return null
   }
 
-  // Same proportional coverage calculation as the backend.
+  // Proportional coverage calculation.
   const base = roundMoney(
     basePremium *
-    (requestedCoverage / baseCoverage) *
-    duration,
+      (requestedCoverage / baseCoverage) *
+      duration,
   )
 
-  // Backend rule: 5% discount applies only for 2–5 years.
+  // Apply the InsureX discount only for 2–5-year policies.
   const discountRate =
     duration >= 2
       ? LONG_TERM_DISCOUNT_RATE
       : 0
 
   const discount = roundMoney(
-    base * discountRate / 100,
+    (base * discountRate) / 100,
   )
 
+  // GST is calculated after applying the discount.
   const taxable = roundMoney(base - discount)
 
-  // GST is calculated after applying the discount.
   const gst = roundMoney(
-    taxable * gstRate / 100,
+    (taxable * gstRate) / 100,
   )
 
   const total = roundMoney(taxable + gst)
@@ -559,12 +557,15 @@ export default function BuyPolicy() {
           originalPurchase?.basePremium ?? renewalPremium,
         ),
         discount: Number(originalPurchase?.discountAmount ?? 0),
+        discountRate:
+          Number(originalPurchase?.discountAmount ?? 0) > 0 ? 5 : 0,
         taxable: Number(
           originalPurchase?.taxableAmount ?? renewalPremium,
         ),
         gst: Number(originalPurchase?.gstAmount ?? 0),
+        gstRate: null,
         total: renewalPremium,
-        perYear: renewalPremium / renewalYears,
+        perYear: roundMoney(renewalPremium / renewalYears),
       }
     }
 
@@ -803,9 +804,11 @@ export default function BuyPolicy() {
         )
       }
 
+      // Keep the actual backend-created order amount.
       setPaymentReference({
         orderId: order.orderId,
         paymentId: null,
+        amount: order.amount,
       })
 
       if (
@@ -842,6 +845,7 @@ export default function BuyPolicy() {
       setPaymentReference({
         orderId: order.orderId,
         paymentId: razorpayResponse.razorpay_payment_id,
+        amount: order.amount,
       })
 
       // Backend verification is mandatory.
@@ -929,7 +933,6 @@ export default function BuyPolicy() {
   if (done) {
     return (
       <div className="ix-buy-page">
-
         <div className="ix-buy-success">
           <Panel>
             <div className="empty">
@@ -953,7 +956,14 @@ export default function BuyPolicy() {
 
               <dl className="kv ix-success-details">
                 <dt>Amount paid</dt>
-                <dd>{inr(done.totalPremium ?? est?.total ?? 0)}</dd>
+                <dd>
+                  {inr(
+                    done.totalPremium ??
+                    paymentReference?.amount ??
+                    est?.total ??
+                    0,
+                  )}
+                </dd>
 
                 <dt>Transaction</dt>
                 <dd>
@@ -1026,7 +1036,6 @@ export default function BuyPolicy() {
 
   return (
     <div className="ix-buy-page">
-
       <PageHeader
         title={isRenewal ? 'Renew insurance' : 'Buy insurance'}
         subtitle={
@@ -1105,12 +1114,23 @@ export default function BuyPolicy() {
                   {paymentReference && (
                     <div className="ix-checkout-reference">
                       <div>
-                        Order ID: <strong>{paymentReference.orderId || '—'}</strong>
+                        Order ID:{' '}
+                        <strong>
+                          {paymentReference.orderId || '—'}
+                        </strong>
                       </div>
 
                       {paymentReference.paymentId && (
                         <div>
-                          Payment ID: <strong>{paymentReference.paymentId}</strong>
+                          Payment ID:{' '}
+                          <strong>{paymentReference.paymentId}</strong>
+                        </div>
+                      )}
+
+                      {Number.isFinite(paymentReference.amount) && (
+                        <div>
+                          Order amount:{' '}
+                          <strong>{inr(paymentReference.amount)}</strong>
                         </div>
                       )}
                     </div>
@@ -1183,7 +1203,10 @@ export default function BuyPolicy() {
                         <dd>{inr(effectiveCoverage)}</dd>
 
                         <dt>Term</dt>
-                        <dd>{effectiveYears} yr</dd>
+                        <dd>
+                          {effectiveYears}{' '}
+                          {effectiveYears === 1 ? 'year' : 'years'}
+                        </dd>
 
                         {!isRenewal && (
                           <>
@@ -1196,7 +1219,9 @@ export default function BuyPolicy() {
                               {inr(policy.baseCoverage)} of cover, per year
                             </dd>
 
-                            <dt>InsureX discount ({est.discountRate}%)</dt>
+                            <dt>
+                              InsureX discount ({est.discountRate}%)
+                            </dt>
                             <dd>− {inr(est.discount)}</dd>
 
                             <dt>
@@ -1314,7 +1339,10 @@ export default function BuyPolicy() {
                         <dd>{inr(effectiveCoverage)}</dd>
 
                         <dt>Term</dt>
-                        <dd>{effectiveYears} yr</dd>
+                        <dd>
+                          {effectiveYears}{' '}
+                          {effectiveYears === 1 ? 'year' : 'years'}
+                        </dd>
 
                         <dt>Nominee</dt>
                         <dd>
@@ -1330,7 +1358,9 @@ export default function BuyPolicy() {
                             <dt>Base premium</dt>
                             <dd>{inr(est.base)}</dd>
 
-                            <dt>InsureX discount ({est.discountRate}%)</dt>
+                            <dt>
+                              InsureX discount ({est.discountRate}%)
+                            </dt>
                             <dd>− {inr(est.discount)}</dd>
 
                             <dt>
