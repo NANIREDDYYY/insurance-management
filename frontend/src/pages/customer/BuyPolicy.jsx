@@ -1,3 +1,4 @@
+
 // =========================================================
 // INSUREX — BUY POLICY / RENEW POLICY
 // File: BuyPolicy.jsx
@@ -46,7 +47,6 @@ import { dateTime, inr, inrShort } from '../../lib/format'
 import { ShieldCheck } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 
-
 /* =========================================================
    CONSTANTS
 ========================================================= */
@@ -66,6 +66,9 @@ const STEPS = ['Cover', 'Nominee', 'Review and pay']
 
 const RAZORPAY_SCRIPT =
   'https://checkout.razorpay.com/v1/checkout.js'
+
+const LONG_TERM_DISCOUNT_RATE = 5
+const MOTOR_GST_RATE = 18
 
 /* =========================================================
    NORMALIZATION
@@ -132,9 +135,45 @@ function isCompletedRenewal(purchase, sourceNumber) {
 /* =========================================================
    PREMIUM ESTIMATE
 
-   This is a frontend estimate only.
-   The actual payable amount comes from the backend order.
+   Matches the current backend calculation:
+   - 1 year: no long-term discount.
+   - 2–5 years: 5% InsureX discount.
+   - HLT- plans: 0% GST.
+   - LIF- plans: 0% GST.
+   - MTR- plans: 18% GST.
+
+   The backend remains authoritative.
 ========================================================= */
+
+function roundMoney(amount) {
+  return Math.round(
+    (Number(amount) + Number.EPSILON) * 100,
+  ) / 100
+}
+
+function getPlanGstRate(plan) {
+  const planCode = String(
+    plan?.planCode ?? plan?.code ?? '',
+  )
+    .trim()
+    .toUpperCase()
+
+  if (planCode.startsWith('HLT-')) {
+    return 0
+  }
+
+  if (planCode.startsWith('LIF-')) {
+    return 0
+  }
+
+  if (planCode.startsWith('MTR-')) {
+    return MOTOR_GST_RATE
+  }
+
+  // Match the backend's fail-closed classification.
+  // Unknown plan codes must not receive an invented GST rate.
+  return null
+}
 
 function calculatePremium(plan, coverage, years) {
   const basePremium = Number(plan?.basePremium)
@@ -156,32 +195,36 @@ function calculatePremium(plan, coverage, years) {
     return null
   }
 
-  const roundMoney = (amount) =>
-    Math.round((amount + Number.EPSILON) * 100) / 100
+  const gstRate = getPlanGstRate(plan)
 
+  if (gstRate === null) {
+    return null
+  }
+
+  // Same proportional coverage calculation as the backend.
   const base = roundMoney(
-    basePremium * (requestedCoverage / baseCoverage) * duration,
+    basePremium *
+    (requestedCoverage / baseCoverage) *
+    duration,
   )
 
-  // InsureX estimate: apply the configured 5% discount to every term
-  // from 1 through 5 years. The backend must use the same rule to charge it.
-  const discountRate = 5
-  const discount = roundMoney(base * discountRate / 100)
+  // Backend rule: 5% discount applies only for 2–5 years.
+  const discountRate =
+    duration >= 2
+      ? LONG_TERM_DISCOUNT_RATE
+      : 0
+
+  const discount = roundMoney(
+    base * discountRate / 100,
+  )
+
   const taxable = roundMoney(base - discount)
 
-  // GST estimate for Indian insurance products as of October 2026:
-  // eligible individual life and individual health policies are exempt;
-  // group policies and other taxable insurance products use 18% here.
-  // The backend must implement the same classification before charging.
-  const planType = String(
-    `${plan?.coveredType ?? ''} ${plan?.planName ?? ''} ${plan?.planCode ?? ''} ${plan?.category ?? ''}`,
-  ).toLowerCase()
-  const isGroupPolicy = /\bgroup\b|corporate|employer|employee/.test(planType)
-  const isIndividualHealthOrLife =
-    /health|medical|hospital|life|family floater|senior citizen/.test(planType) &&
-    !isGroupPolicy
-  const gstRate = isIndividualHealthOrLife ? 0 : 18
-  const gst = roundMoney(taxable * gstRate / 100)
+  // GST is calculated after applying the discount.
+  const gst = roundMoney(
+    taxable * gstRate / 100,
+  )
+
   const total = roundMoney(taxable + gst)
 
   return {
@@ -193,6 +236,7 @@ function calculatePremium(plan, coverage, years) {
     gstRate,
     total,
     perYear: roundMoney(total / duration),
+    isEstimate: true,
   }
 }
 
@@ -302,11 +346,6 @@ function getPurchaseError(error) {
     'We could not confirm your insurance purchase.',
   )
 }
-
-/* =========================================================
-   INSUREX PREMIUM GREEN STYLES
-========================================================= */
-
 
 /* =========================================================
    COMPONENT
@@ -912,9 +951,7 @@ export default function BuyPolicy() {
                     }. Your purchase has been recorded.`}
               </p>
 
-              <dl
-                className="kv ix-success-details"
-              >
+              <dl className="kv ix-success-details">
                 <dt>Amount paid</dt>
                 <dd>{inr(done.totalPremium ?? est?.total ?? 0)}</dd>
 
@@ -1159,10 +1196,14 @@ export default function BuyPolicy() {
                               {inr(policy.baseCoverage)} of cover, per year
                             </dd>
 
-                            <dt>InsureX discount ({est.discountRate ?? 5}%)</dt>
+                            <dt>InsureX discount ({est.discountRate}%)</dt>
                             <dd>− {inr(est.discount)}</dd>
 
-                            <dt>{(est.gstRate ?? 0) === 0 ? 'GST (exempt)' : `Estimated GST (${est.gstRate}%)`}</dt>
+                            <dt>
+                              {est.gstRate === 0
+                                ? 'GST (exempt)'
+                                : `Estimated GST (${est.gstRate}%)`}
+                            </dt>
                             <dd>{inr(est.gst)}</dd>
                           </>
                         )}
@@ -1172,12 +1213,13 @@ export default function BuyPolicy() {
                       </dl>
 
                       <p className="ix-estimate-note">
-                        {est.gstRate === 0
-                          ? 'GST is shown as exempt for eligible individual health/life policies. Confirm the product classification and applicable tax treatment with InsureX before charging.'
-                          : `GST is estimated at ${est.gstRate}% for this policy type.`}{' '}
-                        This is an indicative estimate. The secure payment order
-                        amount is determined by InsureX's backend, which must
-                        apply the same discount and GST rules.
+                        {isRenewal
+                          ? 'The renewal amount is based on the original paid purchase. The backend determines the final renewal order amount.'
+                          : est.gstRate === 0
+                            ? 'GST is estimated at 0% for this qualifying individual health/life plan. Actual tax treatment depends on the policy classification.'
+                            : `GST is estimated at ${est.gstRate}% for this motor policy.`}{' '}
+                        This is an indicative estimate. The backend determines
+                        the actual payment order amount.
                       </p>
                     </Panel>
                   )}
@@ -1288,10 +1330,14 @@ export default function BuyPolicy() {
                             <dt>Base premium</dt>
                             <dd>{inr(est.base)}</dd>
 
-                            <dt>InsureX discount ({est.discountRate ?? 5}%)</dt>
+                            <dt>InsureX discount ({est.discountRate}%)</dt>
                             <dd>− {inr(est.discount)}</dd>
 
-                            <dt>{(est.gstRate ?? 0) === 0 ? 'GST (exempt)' : `Estimated GST (${est.gstRate}%)`}</dt>
+                            <dt>
+                              {est.gstRate === 0
+                                ? 'GST (exempt)'
+                                : `Estimated GST (${est.gstRate}%)`}
+                            </dt>
                             <dd>{inr(est.gst)}</dd>
                           </>
                         )}
@@ -1409,7 +1455,7 @@ export default function BuyPolicy() {
                       premiumEstimate={{
                         ...est,
                         perYear: est.perYear,
-                        gstRate: est.gstRate ?? 0,
+                        gstRate: est.gstRate,
                       }}
                     />
                   </aside>
