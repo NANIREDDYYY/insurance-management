@@ -1,14 +1,3 @@
-// =========================================================
-// INSUREX — BUY POLICY / RENEW POLICY
-// File: BuyPolicy.jsx
-//
-// New purchase • Renewal • Razorpay checkout
-// Server-side verification • Duplicate-click protection
-// Uncertain-payment protection • Query-cache synchronization
-//
-// The backend remains authoritative for payable amounts,
-// payment verification, purchase completion and renewals.
-// =========================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -61,13 +50,165 @@ const RELATIONS = [
   'Other',
 ]
 
-const STEPS = ['Cover', 'Nominee', 'Review and pay']
+const GENDERS = ['Male', 'Female', 'Other']
+
+const OCCUPATIONS = [
+  'Salaried',
+  'Self-employed',
+  'Business',
+  'Government employee',
+  'Professional',
+  'Student',
+  'Homemaker',
+  'Retired',
+  'Other',
+]
+
+const FUEL_TYPES = [
+  'Petrol',
+  'Diesel',
+  'Electric',
+  'CNG',
+  'Hybrid',
+  'Other',
+]
+
+const VEHICLE_USAGES = [
+  'Personal',
+  'Commercial',
+]
+
+const YES_NO = ['Yes', 'No']
+
+const STEPS = [
+  'Cover',
+  'Application details',
+  'Nominee',
+  'Review and pay',
+]
+
+const RENEWAL_STEPS = [
+  'Cover',
+  'Nominee',
+  'Review and pay',
+]
 
 const RAZORPAY_SCRIPT =
   'https://checkout.razorpay.com/v1/checkout.js'
 
 const LONG_TERM_DISCOUNT_RATE = 5
 const MOTOR_GST_RATE = 18
+
+const inputStyle = {
+  width: '100%',
+  minWidth: 0,
+  boxSizing: 'border-box',
+  padding: '11px 12px',
+  border: '1px solid #d6e0dc',
+  borderRadius: '9px',
+  background: '#fff',
+  color: '#172b23',
+  fontSize: '14px',
+  outlineColor: '#17814f',
+}
+
+const labelStyle = {
+  display: 'block',
+  marginBottom: '6px',
+  color: '#34483e',
+  fontSize: '13px',
+  fontWeight: 600,
+}
+
+const fieldWrapperStyle = {
+  minWidth: 0,
+  marginBottom: '15px',
+}
+
+const errorStyle = {
+  display: 'block',
+  color: '#c0392b',
+  fontSize: '12px',
+  marginTop: '5px',
+}
+
+/* =========================================================
+   INLINE APPLICATION FIELD
+========================================================= */
+
+function ApplicationField({
+  label,
+  name,
+  value,
+  onChange,
+  error,
+  type = 'text',
+  options = [],
+  placeholder = 'Enter here',
+  required = false,
+  disabled = false,
+  min,
+  max,
+  maxLength,
+}) {
+  const commonProps = {
+    name,
+    value: value ?? '',
+    disabled,
+    required,
+    style: {
+      ...inputStyle,
+      borderColor: error ? '#dc5b55' : '#d6e0dc',
+      opacity: disabled ? 0.65 : 1,
+    },
+    onChange: (event) => onChange(name, event.target.value),
+  }
+
+  return (
+    <div style={fieldWrapperStyle}>
+      <label htmlFor={`application-${name}`} style={labelStyle}>
+        {label}
+        {required && <span style={{ color: '#dc5b55' }}> *</span>}
+      </label>
+
+      {type === 'textarea' ? (
+        <textarea
+          id={`application-${name}`}
+          {...commonProps}
+          rows={3}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          style={{
+            ...commonProps.style,
+            resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
+        />
+      ) : type === 'select' ? (
+        <select id={`application-${name}`} {...commonProps}>
+          <option value="">Choose...</option>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={`application-${name}`}
+          {...commonProps}
+          type={type}
+          placeholder={placeholder}
+          min={min}
+          max={max}
+          maxLength={maxLength}
+        />
+      )}
+
+      {error && <span style={errorStyle}>{error}</span>}
+    </div>
+  )
+}
 
 /* =========================================================
    NORMALIZATION
@@ -132,16 +273,95 @@ function isCompletedRenewal(purchase, sourceNumber) {
 }
 
 /* =========================================================
+   PLAN CLASSIFICATION
+========================================================= */
+
+function getPlanCategory(plan) {
+  const code = String(
+    plan?.planCode ?? plan?.code ?? '',
+  ).trim().toUpperCase()
+
+  if (code.startsWith('HLT-')) return 'HEALTH'
+  if (code.startsWith('LIF-')) return 'LIFE'
+  if (code.startsWith('MTR-')) return 'MOTOR'
+
+  const text = String(
+    plan?.coveredType ?? plan?.planName ?? '',
+  ).toLowerCase()
+
+  if (text.includes('health')) return 'HEALTH'
+  if (text.includes('life')) return 'LIFE'
+  if (
+    text.includes('motor') ||
+    text.includes('car') ||
+    text.includes('vehicle') ||
+    text.includes('bike')
+  ) return 'MOTOR'
+
+  return ''
+}
+
+function isFamilyPlan(plan) {
+  const code = String(
+    plan?.planCode ?? plan?.code ?? '',
+  ).trim().toUpperCase()
+
+  return [
+    'HLT-FAMILY',
+    'LIF-FAMILY',
+  ].includes(code)
+}
+
+function createInitialApplicationDetails() {
+  return {
+    applicantName: '',
+    dateOfBirth: '',
+    gender: '',
+    occupation: '',
+
+    heightCm: '',
+    weightKg: '',
+    hasPreExistingDisease: '',
+    preExistingDiseases: '',
+    medicalHistory: '',
+    takingMedication: '',
+    medicationDetails: '',
+
+    annualIncome: '',
+    smokingStatus: '',
+    alcoholConsumption: '',
+    hazardousActivities: '',
+    existingMedicalConditions: '',
+    familyMedicalHistory: '',
+
+    registrationNumber: '',
+    vehicleMake: '',
+    vehicleModel: '',
+    vehicleVariant: '',
+    manufacturingYear: '',
+    fuelType: '',
+    vehicleUsage: '',
+    previousInsurance: '',
+    previousInsurer: '',
+    previousPolicyNumber: '',
+    previousPolicyExpiryDate: '',
+    previousClaims: '',
+    claimDetails: '',
+  }
+}
+
+function createEmptyFamilyMember() {
+  return {
+    name: '',
+    relation: '',
+    dateOfBirth: '',
+    gender: '',
+    occupation: '',
+  }
+}
+
+/* =========================================================
    PREMIUM ESTIMATE
-
-   Matches the current backend calculation:
-   - 1 year: no long-term discount.
-   - 2–5 years: 5% InsureX discount.
-   - HLT- plans: 0% GST.
-   - LIF- plans: 0% GST.
-   - MTR- plans: 18% GST.
-
-   The backend remains authoritative.
 ========================================================= */
 
 function roundMoney(amount) {
@@ -157,19 +377,10 @@ function getPlanGstRate(plan) {
     .trim()
     .toUpperCase()
 
-  if (planCode.startsWith('HLT-')) {
-    return 0
-  }
+  if (planCode.startsWith('HLT-')) return 0
+  if (planCode.startsWith('LIF-')) return 0
+  if (planCode.startsWith('MTR-')) return MOTOR_GST_RATE
 
-  if (planCode.startsWith('LIF-')) {
-    return 0
-  }
-
-  if (planCode.startsWith('MTR-')) {
-    return MOTOR_GST_RATE
-  }
-
-  // Unknown plan codes are not assigned an invented GST rate.
   return null
 }
 
@@ -195,18 +406,14 @@ function calculatePremium(plan, coverage, years) {
 
   const gstRate = getPlanGstRate(plan)
 
-  if (gstRate === null) {
-    return null
-  }
+  if (gstRate === null) return null
 
-  // Proportional coverage calculation.
   const base = roundMoney(
     basePremium *
       (requestedCoverage / baseCoverage) *
       duration,
   )
 
-  // Apply the InsureX discount only for 2–5-year policies.
   const discountRate =
     duration >= 2
       ? LONG_TERM_DISCOUNT_RATE
@@ -216,7 +423,6 @@ function calculatePremium(plan, coverage, years) {
     (base * discountRate) / 100,
   )
 
-  // GST is calculated after applying the discount.
   const taxable = roundMoney(base - discount)
 
   const gst = roundMoney(
@@ -315,8 +521,6 @@ function loadRazorpay() {
 
 /* =========================================================
    ORDER HELPERS
-
-   Preserve the existing backend contract: amount is INR.
 ========================================================= */
 
 function normalizeOrder(order) {
@@ -343,6 +547,12 @@ function getPurchaseError(error) {
     error,
     'We could not confirm your insurance purchase.',
   )
+}
+
+function displayLabel(value) {
+  return String(value || '')
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (character) => character.toUpperCase())
 }
 
 /* =========================================================
@@ -374,6 +584,12 @@ export default function BuyPolicy() {
     relation: '',
     contact: '',
   })
+
+  const [applicationDetails, setApplicationDetails] = useState(
+    createInitialApplicationDetails,
+  )
+
+  const [familyMembers, setFamilyMembers] = useState([])
 
   const [errors, setErrors] = useState({})
   const [paying, setPaying] = useState(false)
@@ -603,6 +819,22 @@ export default function BuyPolicy() {
 
   const blockedRenewal = isRenewal && alreadyRenewed
 
+  /* APPLICATION CATEGORY */
+
+  const planCategory = useMemo(
+    () => getPlanCategory(policy),
+    [policy],
+  )
+
+  const familyPlan = useMemo(
+    () => isFamilyPlan(policy),
+    [policy],
+  )
+
+  const applicationStepLabel = isRenewal
+    ? RENEWAL_STEPS
+    : STEPS
+
   /* EFFECTS */
 
   useEffect(() => {
@@ -619,7 +851,283 @@ export default function BuyPolicy() {
     })
   }, [isRenewal, originalPurchase])
 
+  /* APPLICATION STATE HELPERS */
+
+  function updateApplicationField(name, value) {
+    setApplicationDetails((current) => ({
+      ...current,
+      [name]: value,
+    }))
+
+    setErrors((current) => ({
+      ...current,
+      [name]: '',
+    }))
+  }
+
+  function updateFamilyMember(index, name, value) {
+    setFamilyMembers((current) =>
+      current.map((member, memberIndex) =>
+        memberIndex === index
+          ? { ...member, [name]: value }
+          : member,
+      ),
+    )
+
+    setErrors((current) => ({
+      ...current,
+      [`family-${index}-${name}`]: '',
+    }))
+  }
+
+  function addFamilyMember() {
+    setFamilyMembers((current) => [
+      ...current,
+      createEmptyFamilyMember(),
+    ])
+  }
+
+  function removeFamilyMember(index) {
+    setFamilyMembers((current) =>
+      current.filter((_, memberIndex) => memberIndex !== index),
+    )
+  }
+
   /* VALIDATION */
+
+  function validateApplication() {
+    const nextErrors = {}
+    const details = applicationDetails
+
+    if (!planCategory) {
+      nextErrors.application =
+        'The selected plan category could not be identified.'
+    }
+
+    if (planCategory === 'HEALTH') {
+      if (!details.applicantName.trim()) {
+        nextErrors.applicantName = 'Enter the applicant’s full name.'
+      }
+
+      if (!details.dateOfBirth) {
+        nextErrors.dateOfBirth = 'Select the date of birth.'
+      }
+
+      if (!details.gender) {
+        nextErrors.gender = 'Select gender.'
+      }
+
+      if (!details.occupation) {
+        nextErrors.occupation = 'Select occupation.'
+      }
+
+      if (!details.hasPreExistingDisease) {
+        nextErrors.hasPreExistingDisease =
+          'Please answer this question.'
+      }
+
+      if (
+        details.hasPreExistingDisease === 'Yes' &&
+        !details.preExistingDiseases.trim()
+      ) {
+        nextErrors.preExistingDiseases =
+          'Describe the existing medical conditions.'
+      }
+
+      if (!details.medicalHistory.trim()) {
+        nextErrors.medicalHistory =
+          'Provide a brief medical history. Enter None if not applicable.'
+      }
+
+      if (!details.takingMedication) {
+        nextErrors.takingMedication =
+          'Please answer this question.'
+      }
+
+      if (
+        details.takingMedication === 'Yes' &&
+        !details.medicationDetails.trim()
+      ) {
+        nextErrors.medicationDetails =
+          'Provide medication details.'
+      }
+
+      if (
+        details.heightCm &&
+        (
+          Number(details.heightCm) < 30 ||
+          Number(details.heightCm) > 250
+        )
+      ) {
+        nextErrors.heightCm = 'Enter a valid height in centimetres.'
+      }
+
+      if (
+        details.weightKg &&
+        (
+          Number(details.weightKg) < 2 ||
+          Number(details.weightKg) > 400
+        )
+      ) {
+        nextErrors.weightKg = 'Enter a valid weight in kilograms.'
+      }
+    }
+
+    if (planCategory === 'LIFE') {
+      if (!details.applicantName.trim()) {
+        nextErrors.applicantName =
+          'Enter the life assured’s full name.'
+      }
+
+      if (!details.dateOfBirth) {
+        nextErrors.dateOfBirth = 'Select the date of birth.'
+      }
+
+      if (!details.gender) {
+        nextErrors.gender = 'Select gender.'
+      }
+
+      if (!details.occupation) {
+        nextErrors.occupation = 'Select occupation.'
+      }
+
+      if (
+        !details.annualIncome ||
+        Number(details.annualIncome) <= 0
+      ) {
+        nextErrors.annualIncome =
+          'Enter a valid annual income.'
+      }
+
+      if (!details.smokingStatus) {
+        nextErrors.smokingStatus =
+          'Select your smoking status.'
+      }
+
+      if (!details.alcoholConsumption) {
+        nextErrors.alcoholConsumption =
+          'Select your alcohol consumption status.'
+      }
+
+      if (!details.hazardousActivities) {
+        nextErrors.hazardousActivities =
+          'Please answer this question.'
+      }
+
+      if (!details.existingMedicalConditions.trim()) {
+        nextErrors.existingMedicalConditions =
+          'Enter existing medical conditions or None.'
+      }
+
+      if (!details.familyMedicalHistory.trim()) {
+        nextErrors.familyMedicalHistory =
+          'Enter family medical history or None.'
+      }
+    }
+
+    if (planCategory === 'MOTOR') {
+      if (!details.registrationNumber.trim()) {
+        nextErrors.registrationNumber =
+          'Enter the vehicle registration number.'
+      }
+
+      if (!details.vehicleMake.trim()) {
+        nextErrors.vehicleMake = 'Enter the vehicle make.'
+      }
+
+      if (!details.vehicleModel.trim()) {
+        nextErrors.vehicleModel = 'Enter the vehicle model.'
+      }
+
+      if (!details.manufacturingYear) {
+        nextErrors.manufacturingYear =
+          'Select the manufacturing year.'
+      }
+
+      if (
+        details.manufacturingYear &&
+        (
+          Number(details.manufacturingYear) < 1900 ||
+          Number(details.manufacturingYear) > new Date().getFullYear()
+        )
+      ) {
+        nextErrors.manufacturingYear =
+          'Enter a valid manufacturing year.'
+      }
+
+      if (!details.fuelType) {
+        nextErrors.fuelType = 'Select the fuel type.'
+      }
+
+      if (!details.vehicleUsage) {
+        nextErrors.vehicleUsage = 'Select vehicle usage.'
+      }
+
+      if (!details.previousInsurance) {
+        nextErrors.previousInsurance =
+          'Please indicate whether the vehicle had previous insurance.'
+      }
+
+      if (
+        details.previousInsurance === 'Yes' &&
+        !details.previousInsurer.trim()
+      ) {
+        nextErrors.previousInsurer =
+          'Enter the previous insurance company.'
+      }
+
+      if (!details.previousClaims) {
+        nextErrors.previousClaims =
+          'Please indicate whether there were previous claims.'
+      }
+
+      if (
+        details.previousClaims === 'Yes' &&
+        !details.claimDetails.trim()
+      ) {
+        nextErrors.claimDetails =
+          'Provide brief details of previous claims.'
+      }
+    }
+
+    if (familyPlan) {
+      if (familyMembers.length === 0) {
+        nextErrors.familyMembers =
+          'Add at least one family member for this plan.'
+      }
+
+      familyMembers.forEach((member, index) => {
+        if (!member.name.trim()) {
+          nextErrors[`family-${index}-name`] =
+            'Enter the family member’s name.'
+        }
+
+        if (!member.relation) {
+          nextErrors[`family-${index}-relation`] =
+            'Select the relationship.'
+        }
+
+        if (!member.dateOfBirth) {
+          nextErrors[`family-${index}-dateOfBirth`] =
+            'Select date of birth.'
+        }
+
+        if (!member.gender) {
+          nextErrors[`family-${index}-gender`] =
+            'Select gender.'
+        }
+
+        if (!member.occupation) {
+          nextErrors[`family-${index}-occupation`] =
+            'Select occupation.'
+        }
+      })
+    }
+
+    setErrors(nextErrors)
+
+    return Object.keys(nextErrors).length === 0
+  }
 
   function validateNominee() {
     const nextErrors = {}
@@ -637,7 +1145,11 @@ export default function BuyPolicy() {
         'Enter a valid 10-digit mobile number starting with 6–9.'
     }
 
-    setErrors(nextErrors)
+    setErrors((current) => ({
+      ...current,
+      ...nextErrors,
+    }))
+
     return Object.keys(nextErrors).length === 0
   }
 
@@ -664,10 +1176,7 @@ export default function BuyPolicy() {
       const checkout = new Razorpay({
         key: order.keyId,
         order_id: order.orderId,
-
-        // Existing backend order contract returns INR.
         amount: Math.round(order.amount * 100),
-
         currency: order.currency,
         name: 'InsureX',
 
@@ -746,8 +1255,13 @@ export default function BuyPolicy() {
       return
     }
 
-    if (!isRenewal && !validateNominee()) {
+    if (!isRenewal && !validateApplication()) {
       setStep(1)
+      return
+    }
+
+    if (!validateNominee()) {
+      setStep(isRenewal ? 1 : 2)
       return
     }
 
@@ -804,7 +1318,6 @@ export default function BuyPolicy() {
         )
       }
 
-      // Keep the actual backend-created order amount.
       setPaymentReference({
         orderId: order.orderId,
         paymentId: null,
@@ -848,7 +1361,6 @@ export default function BuyPolicy() {
         amount: order.amount,
       })
 
-      // Backend verification is mandatory.
       const saved = isRenewal
         ? await renewals.confirm(originalPolicyNumber, {
             razorpayOrderId: razorpayResponse.razorpay_order_id,
@@ -860,9 +1372,27 @@ export default function BuyPolicy() {
             coveredTypes: coveredType,
             durationYears: selectedYears,
             coverageAmount: selectedCoverage,
+
             nomineeName: nominee.name.trim(),
             nomineeRelation: nominee.relation,
             nomineeContact: nominee.contact.trim(),
+
+            applicationDetails: {
+              ...applicationDetails,
+              planCode: policy.planCode || policy.code || '',
+              planCategory,
+            },
+
+            familyMembers: familyPlan
+              ? familyMembers.map((member) => ({
+                  name: member.name.trim(),
+                  relation: member.relation,
+                  dateOfBirth: member.dateOfBirth,
+                  gender: member.gender,
+                  occupation: member.occupation,
+                }))
+              : [],
+
             paymentMethod: 'RAZORPAY',
             razorpayOrderId: razorpayResponse.razorpay_order_id,
             razorpayPaymentId: razorpayResponse.razorpay_payment_id,
@@ -882,7 +1412,6 @@ export default function BuyPolicy() {
       try {
         await refreshRelatedData()
       } catch (refreshError) {
-        // Cache-refresh errors must not undo confirmed payment success.
         console.error('InsureX cache refresh failed:', refreshError)
       }
     } catch (paymentError) {
@@ -893,7 +1422,6 @@ export default function BuyPolicy() {
           'Checkout was closed. If your bank shows a debit, check Payments before trying again.',
         )
       } else if (checkoutCompleted) {
-        // Never repeat a purchase call automatically after successful checkout.
         setPaymentUncertain(true)
 
         setError(
@@ -1032,6 +1560,581 @@ export default function BuyPolicy() {
       }
     : list
 
+  /* APPLICATION FORM RENDERER */
+
+  function renderApplicationField(field) {
+    return (
+      <ApplicationField
+        key={field.name}
+        {...field}
+        value={applicationDetails[field.name]}
+        onChange={updateApplicationField}
+        error={errors[field.name]}
+      />
+    )
+  }
+
+  function renderApplicationForm() {
+    if (planCategory === 'HEALTH') {
+      const fields = [
+        {
+          name: 'applicantName',
+          label: 'Applicant full name',
+          required: true,
+        },
+        {
+          name: 'dateOfBirth',
+          label: 'Date of birth',
+          type: 'date',
+          required: true,
+        },
+        {
+          name: 'gender',
+          label: 'Gender',
+          type: 'select',
+          options: GENDERS,
+          required: true,
+        },
+        {
+          name: 'occupation',
+          label: 'Occupation',
+          type: 'select',
+          options: OCCUPATIONS,
+          required: true,
+        },
+        {
+          name: 'heightCm',
+          label: 'Height (cm)',
+          type: 'number',
+          min: 30,
+          max: 250,
+          placeholder: 'Optional',
+        },
+        {
+          name: 'weightKg',
+          label: 'Weight (kg)',
+          type: 'number',
+          min: 2,
+          max: 400,
+          placeholder: 'Optional',
+        },
+        {
+          name: 'hasPreExistingDisease',
+          label: 'Do you have any pre-existing disease?',
+          type: 'select',
+          options: YES_NO,
+          required: true,
+        },
+        {
+          name: 'preExistingDiseases',
+          label: 'Existing diseases and conditions',
+          type: 'textarea',
+          placeholder: 'Enter details, or leave blank if none',
+          required:
+            applicationDetails.hasPreExistingDisease === 'Yes',
+        },
+        {
+          name: 'medicalHistory',
+          label: 'Medical history',
+          type: 'textarea',
+          placeholder: 'Describe your medical history or enter None',
+          required: true,
+        },
+        {
+          name: 'takingMedication',
+          label: 'Are you currently taking medication?',
+          type: 'select',
+          options: YES_NO,
+          required: true,
+        },
+        {
+          name: 'medicationDetails',
+          label: 'Current medication details',
+          type: 'textarea',
+          placeholder: 'Medicine name and reason',
+          required:
+            applicationDetails.takingMedication === 'Yes',
+        },
+      ]
+
+      return (
+        <>
+          <div style={sectionHeadingStyle}>
+            <strong>Applicant information</strong>
+            <span>Health insurance application</span>
+          </div>
+
+          <div style={applicationGridStyle}>
+            {fields.map(renderApplicationField)}
+          </div>
+
+          {familyPlan && renderFamilyMembers()}
+        </>
+      )
+    }
+
+    if (planCategory === 'LIFE') {
+      const fields = [
+        {
+          name: 'applicantName',
+          label: 'Life assured full name',
+          required: true,
+        },
+        {
+          name: 'dateOfBirth',
+          label: 'Date of birth',
+          type: 'date',
+          required: true,
+        },
+        {
+          name: 'gender',
+          label: 'Gender',
+          type: 'select',
+          options: GENDERS,
+          required: true,
+        },
+        {
+          name: 'occupation',
+          label: 'Occupation',
+          type: 'select',
+          options: OCCUPATIONS,
+          required: true,
+        },
+        {
+          name: 'annualIncome',
+          label: 'Annual income (₹)',
+          type: 'number',
+          min: 1,
+          required: true,
+        },
+        {
+          name: 'smokingStatus',
+          label: 'Smoking status',
+          type: 'select',
+          options: [
+            'Never smoked',
+            'Former smoker',
+            'Currently smoking',
+          ],
+          required: true,
+        },
+        {
+          name: 'alcoholConsumption',
+          label: 'Alcohol consumption',
+          type: 'select',
+          options: [
+            'Never',
+            'Occasionally',
+            'Regularly',
+          ],
+          required: true,
+        },
+        {
+          name: 'hazardousActivities',
+          label: 'Do you participate in hazardous activities?',
+          type: 'select',
+          options: YES_NO,
+          required: true,
+        },
+        {
+          name: 'existingMedicalConditions',
+          label: 'Existing medical conditions',
+          type: 'textarea',
+          placeholder: 'Enter details or None',
+          required: true,
+        },
+        {
+          name: 'familyMedicalHistory',
+          label: 'Family medical history',
+          type: 'textarea',
+          placeholder: 'Enter relevant family medical history or None',
+          required: true,
+        },
+      ]
+
+      return (
+        <>
+          <div style={sectionHeadingStyle}>
+            <strong>Life assured information</strong>
+            <span>Life insurance application</span>
+          </div>
+
+          <div style={applicationGridStyle}>
+            {fields.map(renderApplicationField)}
+          </div>
+
+          {familyPlan && renderFamilyMembers()}
+        </>
+      )
+    }
+
+    if (planCategory === 'MOTOR') {
+      const fields = [
+        {
+          name: 'registrationNumber',
+          label: 'Vehicle registration number',
+          placeholder: 'e.g. TS09AB1234',
+          required: true,
+        },
+        {
+          name: 'vehicleMake',
+          label: 'Vehicle make / manufacturer',
+          placeholder: 'e.g. Maruti Suzuki',
+          required: true,
+        },
+        {
+          name: 'vehicleModel',
+          label: 'Vehicle model',
+          placeholder: 'e.g. Swift',
+          required: true,
+        },
+        {
+          name: 'vehicleVariant',
+          label: 'Vehicle variant',
+          placeholder: 'Optional',
+        },
+        {
+          name: 'manufacturingYear',
+          label: 'Manufacturing year',
+          type: 'number',
+          min: 1900,
+          max: new Date().getFullYear(),
+          required: true,
+        },
+        {
+          name: 'fuelType',
+          label: 'Fuel type',
+          type: 'select',
+          options: FUEL_TYPES,
+          required: true,
+        },
+        {
+          name: 'vehicleUsage',
+          label: 'Vehicle usage',
+          type: 'select',
+          options: VEHICLE_USAGES,
+          required: true,
+        },
+        {
+          name: 'previousInsurance',
+          label: 'Was the vehicle previously insured?',
+          type: 'select',
+          options: YES_NO,
+          required: true,
+        },
+        {
+          name: 'previousInsurer',
+          label: 'Previous insurance company',
+          placeholder: 'Enter insurer name',
+          required:
+            applicationDetails.previousInsurance === 'Yes',
+        },
+        {
+          name: 'previousPolicyNumber',
+          label: 'Previous policy number',
+          placeholder: 'Optional',
+        },
+        {
+          name: 'previousPolicyExpiryDate',
+          label: 'Previous policy expiry date',
+          type: 'date',
+        },
+        {
+          name: 'previousClaims',
+          label: 'Were any claims made previously?',
+          type: 'select',
+          options: YES_NO,
+          required: true,
+        },
+        {
+          name: 'claimDetails',
+          label: 'Previous claim details',
+          type: 'textarea',
+          placeholder: 'Describe previous claims',
+          required:
+            applicationDetails.previousClaims === 'Yes',
+        },
+      ]
+
+      return (
+        <>
+          <div style={sectionHeadingStyle}>
+            <strong>Vehicle information</strong>
+            <span>Motor insurance application</span>
+          </div>
+
+          <div style={applicationGridStyle}>
+            {fields.map(renderApplicationField)}
+          </div>
+        </>
+      )
+    }
+
+    return (
+      <div className="alert warn">
+        Unable to identify the selected plan category. Please contact support.
+      </div>
+    )
+  }
+
+  function renderFamilyMembers() {
+    return (
+      <div style={{ marginTop: '22px' }}>
+        <div
+          style={{
+            ...sectionHeadingStyle,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <strong>Family members</strong>
+            <span>Add the members who will be covered by this plan.</span>
+          </div>
+
+          <Button
+            type="button"
+            variant="dark"
+            onClick={addFamilyMember}
+            disabled={paying}
+          >
+            + Add member
+          </Button>
+        </div>
+
+        {errors.familyMembers && (
+          <div className="alert error" role="alert">
+            {errors.familyMembers}
+          </div>
+        )}
+
+        {familyMembers.map((member, index) => (
+          <div
+            key={index}
+            style={{
+              border: '1px solid #dce8e1',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '14px',
+              background: '#fbfdfb',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                marginBottom: '14px',
+              }}
+            >
+              <strong style={{ color: '#176b43', fontSize: '14px' }}>
+                Family member {index + 1}
+              </strong>
+
+              <button
+                type="button"
+                onClick={() => removeFamilyMember(index)}
+                disabled={paying}
+                style={{
+                  border: '1px solid #e7c8c8',
+                  background: '#fff',
+                  color: '#b33b3b',
+                  borderRadius: '7px',
+                  padding: '6px 10px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                }}
+              >
+                Remove
+              </button>
+            </div>
+
+            <div style={applicationGridStyle}>
+              {[
+                {
+                  name: 'name',
+                  label: 'Full name',
+                  type: 'text',
+                },
+                {
+                  name: 'relation',
+                  label: 'Relationship',
+                  type: 'select',
+                  options: RELATIONS,
+                },
+                {
+                  name: 'dateOfBirth',
+                  label: 'Date of birth',
+                  type: 'date',
+                },
+                {
+                  name: 'gender',
+                  label: 'Gender',
+                  type: 'select',
+                  options: GENDERS,
+                },
+                {
+                  name: 'occupation',
+                  label: 'Occupation',
+                  type: 'select',
+                  options: OCCUPATIONS,
+                },
+              ].map((field) => (
+                <ApplicationField
+                  key={field.name}
+                  {...field}
+                  value={member[field.name]}
+                  onChange={(name, value) =>
+                    updateFamilyMember(index, name, value)
+                  }
+                  error={errors[`family-${index}-${field.name}`]}
+                  required
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {familyMembers.length === 0 && (
+          <div
+            style={{
+              border: '1px dashed #b9cec1',
+              borderRadius: '10px',
+              padding: '18px',
+              color: '#607468',
+              textAlign: 'center',
+              fontSize: '13px',
+            }}
+          >
+            No family members added yet. Select Add member to continue.
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  /* APPLICATION REVIEW */
+
+  function renderApplicationReview() {
+    const excludedKeys = new Set([
+      'preExistingDiseases',
+      'medicationDetails',
+      'medicalHistory',
+      'existingMedicalConditions',
+      'familyMedicalHistory',
+      'claimDetails',
+    ])
+
+    const entries = Object.entries(applicationDetails)
+      .filter(([key, value]) => (
+        value !== '' &&
+        value !== null &&
+        value !== undefined &&
+        !excludedKeys.has(key)
+      ))
+
+    return (
+      <div style={{ marginTop: '16px' }}>
+        <h4 style={{ color: '#176b43', marginBottom: '10px' }}>
+          Application information
+        </h4>
+
+        <dl className="kv">
+          {entries.map(([key, value]) => (
+            <div key={key} style={{ display: 'contents' }}>
+              <dt>{displayLabel(key)}</dt>
+              <dd>{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {[
+          ['medicalHistory', 'Medical history'],
+          ['preExistingDiseases', 'Pre-existing diseases'],
+          ['medicationDetails', 'Medication details'],
+          ['existingMedicalConditions', 'Existing medical conditions'],
+          ['familyMedicalHistory', 'Family medical history'],
+          ['claimDetails', 'Previous claim details'],
+        ].map(([key, label]) => (
+          applicationDetails[key] ? (
+            <div key={key} style={{ marginTop: '10px' }}>
+              <strong style={{ fontSize: '13px', color: '#34483e' }}>
+                {label}
+              </strong>
+              <p style={{ fontSize: '13px', color: '#53665c', marginTop: '4px' }}>
+                {applicationDetails[key]}
+              </p>
+            </div>
+          ) : null
+        ))}
+
+        {familyPlan && familyMembers.length > 0 && (
+          <div style={{ marginTop: '18px' }}>
+            <h4 style={{ color: '#176b43' }}>Covered family members</h4>
+
+            {familyMembers.map((member, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '12px',
+                  border: '1px solid #e0e9e3',
+                  borderRadius: '9px',
+                  marginTop: '8px',
+                  fontSize: '13px',
+                }}
+              >
+                <strong>{member.name}</strong>
+                <div style={{ color: '#5a6c62', marginTop: '4px' }}>
+                  {member.relation} · {member.gender} · {member.dateOfBirth}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  /* NAVIGATION VALIDATION */
+
+  function continueStep() {
+    setError('')
+
+    if (step === 0) {
+      if (!coverageIsValid || !durationIsValid) {
+        setError('Choose valid coverage and duration.')
+        return
+      }
+
+      setStep(1)
+      return
+    }
+
+    if (!isRenewal && step === 1) {
+      if (!validateApplication()) {
+        setError('Please complete the required application details.')
+        return
+      }
+
+      setStep(2)
+      return
+    }
+
+    if (
+      (isRenewal && step === 1) ||
+      (!isRenewal && step === 2)
+    ) {
+      if (!validateNominee()) return
+
+      setStep(isRenewal ? 2 : 3)
+    }
+  }
+
   /* RENDER */
 
   return (
@@ -1065,7 +2168,7 @@ export default function BuyPolicy() {
           <p className="ix-buy-hero-copy">
             {isRenewal
               ? 'Keep your original policy benefits and review your renewal.'
-              : 'Choose your cover, confirm nominee details, and pay securely.'}
+              : 'Choose your cover, complete your application and pay securely.'}
           </p>
         </div>
       </div>
@@ -1115,9 +2218,7 @@ export default function BuyPolicy() {
                     <div className="ix-checkout-reference">
                       <div>
                         Order ID:{' '}
-                        <strong>
-                          {paymentReference.orderId || '—'}
-                        </strong>
+                        <strong>{paymentReference.orderId || '—'}</strong>
                       </div>
 
                       {paymentReference.paymentId && (
@@ -1145,7 +2246,7 @@ export default function BuyPolicy() {
               )}
 
               <ol className="steps ix-steps-list">
-                {STEPS.map((label, index) => (
+                {applicationStepLabel.map((label, index) => (
                   <li
                     key={label}
                     className={`step ${
@@ -1249,9 +2350,37 @@ export default function BuyPolicy() {
                     </Panel>
                   )}
 
-                  {/* STEP 2 — NOMINEE */}
+                  {/* STEP 2 — APPLICATION DETAILS */}
 
-                  {step === 1 && (
+                  {!isRenewal && step === 1 && (
+                    <Panel title="Insurance application details">
+                      <p style={{
+                        color: '#617267',
+                        fontSize: '13px',
+                        marginTop: 0,
+                        marginBottom: '20px',
+                      }}>
+                        Complete the information required for your selected
+                        {` ${planCategory.toLowerCase()} `}insurance plan.
+                        Fields marked with * are required.
+                      </p>
+
+                      {errors.application && (
+                        <div className="alert error">
+                          {errors.application}
+                        </div>
+                      )}
+
+                      {renderApplicationForm()}
+                    </Panel>
+                  )}
+
+                  {/* NOMINEE */}
+
+                  {(
+                    (isRenewal && step === 1) ||
+                    (!isRenewal && step === 2)
+                  ) && (
                     <Panel title="Nominee details">
                       {isRenewal && (
                         <div className="alert info">
@@ -1270,7 +2399,10 @@ export default function BuyPolicy() {
                                 ...nominee,
                                 name: event.target.value,
                               })
-                              setErrors({ ...errors, name: '' })
+                              setErrors({
+                                ...errors,
+                                name: '',
+                              })
                             }}
                             error={errors.name}
                             disabled={isRenewal}
@@ -1285,7 +2417,10 @@ export default function BuyPolicy() {
                               ...nominee,
                               relation: event.target.value,
                             })
-                            setErrors({ ...errors, relation: '' })
+                            setErrors({
+                              ...errors,
+                              relation: '',
+                            })
                           }}
                           options={RELATIONS}
                           placeholder="Choose…"
@@ -1303,8 +2438,15 @@ export default function BuyPolicy() {
                               .replace(/\D/g, '')
                               .slice(0, 10)
 
-                            setNominee({ ...nominee, contact })
-                            setErrors({ ...errors, contact: '' })
+                            setNominee({
+                              ...nominee,
+                              contact,
+                            })
+
+                            setErrors({
+                              ...errors,
+                              contact: '',
+                            })
                           }}
                           error={errors.contact}
                           disabled={isRenewal}
@@ -1313,9 +2455,12 @@ export default function BuyPolicy() {
                     </Panel>
                   )}
 
-                  {/* STEP 3 — REVIEW */}
+                  {/* REVIEW */}
 
-                  {step === 2 && (
+                  {(
+                    (isRenewal && step === 2) ||
+                    (!isRenewal && step === 3)
+                  ) && (
                     <Panel title="Review and pay">
                       <dl className="kv">
                         <dt>Purchase type</dt>
@@ -1376,6 +2521,8 @@ export default function BuyPolicy() {
                         <dd>{inr(est.total)}</dd>
                       </dl>
 
+                      {!isRenewal && renderApplicationReview()}
+
                       <div className="alert info ix-payment-info">
                         Payment is processed through Razorpay. The backend
                         verifies the payment before recording the insurance
@@ -1399,29 +2546,11 @@ export default function BuyPolicy() {
                       </Button>
                     )}
 
-                    {step < 2 ? (
+                    {step < (isRenewal ? 2 : 3) ? (
                       <Button
                         variant="dark"
                         disabled={paying || paymentUncertain}
-                        onClick={() => {
-                          setError('')
-
-                          if (step === 0) {
-                            if (!coverageIsValid || !durationIsValid) {
-                              setError('Choose valid coverage and duration.')
-                              return
-                            }
-
-                            setStep(1)
-                            return
-                          }
-
-                          if (!isRenewal && !validateNominee()) {
-                            return
-                          }
-
-                          setStep(2)
-                        }}
+                        onClick={continueStep}
                       >
                         Continue
                       </Button>
@@ -1498,3 +2627,25 @@ export default function BuyPolicy() {
     </div>
   )
 }
+
+/* =========================================================
+   INLINE LAYOUT STYLES
+========================================================= */
+
+const applicationGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+  columnGap: '16px',
+  rowGap: '2px',
+}
+
+const sectionHeadingStyle = {
+  marginBottom: '16px',
+  color: '#176b43',
+  fontSize: '15px',
+  fontWeight: 700,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '5px',
+}
+
