@@ -173,6 +173,37 @@ export const policies = {
 }
 
 /* =========================================================
+   VEHICLE RC VERIFICATION — API EXPRESS
+========================================================= */
+
+export const vehicleVerification = {
+  verify: (registrationNumber) => {
+    const normalizedNumber = String(
+      registrationNumber ?? ''
+    )
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, '')
+
+    if (
+      !/^[A-Z0-9]{6,15}$/.test(normalizedNumber)
+    ) {
+      return Promise.reject(
+        new Error(
+          'Enter a valid vehicle registration number.'
+        )
+      )
+    }
+
+    return d(
+      api.post('/api/vehicles/verify', {
+        registrationNumber: normalizedNumber,
+      })
+    )
+  },
+}
+
+/* =========================================================
    POLICY PURCHASES & REFUNDS
 ========================================================= */
 
