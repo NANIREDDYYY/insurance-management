@@ -1,10 +1,14 @@
+
 package com.htc.insurance.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.slf4j.Logger;
@@ -139,10 +143,6 @@ public class PolicyPurchaseService {
                     "Payment attempt was not found.");
         }
 
-        // Renewal orders must be confirmed only through the
-        // dedicated renewal flow.
-        // Legacy null purchase types are normal purchases.
-
         String purchaseType = attempt.getPurchaseType();
 
         if (purchaseType != null
@@ -208,7 +208,6 @@ public class PolicyPurchaseService {
                     username,
                     paymentId);
 
-            // A retry must not create another policy.
             return toDto(existing);
         }
 
@@ -289,10 +288,6 @@ public class PolicyPurchaseService {
                     ex);
         }
 
-        // Store the verified payment state independently.
-        // If the purchase transaction fails later, the
-        // payment attempt remains available for recovery.
-
         paymentAttemptService.markPaymentVerified(
                 orderId,
                 paymentId);
@@ -326,11 +321,6 @@ public class PolicyPurchaseService {
         PolicyPurchase purchase = new PolicyPurchase();
 
         purchase.setPolicy(savedPolicy);
-
-        // =====================================================
-        // NEW: PRESERVE VERIFIED ORIGINAL PLAN ID
-        // =====================================================
-
         purchase.setPlanId(attempt.getPlanId());
 
         // =====================================================
@@ -372,6 +362,22 @@ public class PolicyPurchaseService {
                 trimToNull(purchaseDto.getNomineeContact()));
 
         // =====================================================
+        // APPLICATION DETAILS
+        // =====================================================
+
+        purchase.setApplicationDetails(
+                copyApplicationDetails(
+                        purchaseDto.getApplicationDetails()));
+
+        // =====================================================
+        // FAMILY MEMBERS
+        // =====================================================
+
+        purchase.setFamilyMembers(
+                toFamilyMemberMaps(
+                        purchaseDto.getFamilyMembers()));
+
+        // =====================================================
         // PAYMENT DETAILS
         // =====================================================
 
@@ -397,10 +403,6 @@ public class PolicyPurchaseService {
                     policyPurchaseDao.savePurchase(purchase);
 
         } catch (DataIntegrityViolationException ex) {
-
-            // Let the transaction roll back.
-            // A later retry can retrieve an existing
-            // committed purchase by Razorpay order ID.
 
             log.warn(
                     "Purchase persistence conflict for order {}",
@@ -541,6 +543,54 @@ public class PolicyPurchaseService {
                     "Razorpay order ID, payment ID "
                     + "and signature are required.");
         }
+
+        validateFamilyMembers(dto.getFamilyMembers());
+    }
+
+    // =========================================================
+    // FAMILY MEMBER VALIDATION
+    // =========================================================
+
+    private void validateFamilyMembers(
+            List<PurchasePolicyDto.FamilyMemberDto> members) {
+
+        if (members == null) {
+            return;
+        }
+
+        if (members.size() > 20) {
+            throw new IllegalArgumentException(
+                    "A maximum of 20 family members can be added.");
+        }
+
+        for (PurchasePolicyDto.FamilyMemberDto member : members) {
+
+            if (member == null
+                    || isBlank(member.getName())
+                    || isBlank(member.getRelation())) {
+
+                throw new IllegalArgumentException(
+                        "Every family member must have a name and relation.");
+            }
+
+            if (member.getName().trim().length() > 100
+                    || member.getRelation().trim().length() > 50
+                    || (member.getGender() != null
+                        && member.getGender().length() > 30)
+                    || (member.getOccupation() != null
+                        && member.getOccupation().length() > 100)) {
+
+                throw new IllegalArgumentException(
+                        "Family member details exceed the allowed length.");
+            }
+
+            if (member.getDateOfBirth() != null
+                    && member.getDateOfBirth().isAfter(LocalDate.now())) {
+
+                throw new IllegalArgumentException(
+                        "Family member date of birth cannot be in the future.");
+            }
+        }
     }
 
     // =========================================================
@@ -608,10 +658,10 @@ public class PolicyPurchaseService {
                     "Insurance plan pricing is invalid.");
         }
 
-        // Enforce the minimum coverage of the selected catalogue plan.
         if (coverage == null
                 || coverage.compareTo(plan.getBaseCoverage()) < 0
                 || coverage.compareTo(MAXIMUM_COVERAGE) > 0) {
+
             throw new IllegalArgumentException(
                     "Coverage is outside the selected plan's allowed range.");
         }
@@ -628,8 +678,6 @@ public class PolicyPurchaseService {
 
         BigDecimal discountAmount = BigDecimal.ZERO
                 .setScale(2, RoundingMode.HALF_UP);
-
-        // No multi-year discount: match PaymentService's order amount.
 
         BigDecimal taxableAmount = basePremium
                 .subtract(discountAmount)
@@ -662,23 +710,21 @@ public class PolicyPurchaseService {
         PurchasePolicyDto dto = new PurchasePolicyDto();
 
         dto.setPurchaseId(purchase.getPurchaseId());
-
-        // =====================================================
-        // NEW: RETURN ORIGINAL PLAN ID
-        // =====================================================
-
         dto.setPlanId(purchase.getPlanId());
 
-        // Expose the verified renewal relationship to customer and admin
-        // purchase listings. A renewed purchase points to its original purchase.
-        PolicyPurchase originalPurchase = purchase.getRenewedFromPurchase();
+        PolicyPurchase originalPurchase =
+                purchase.getRenewedFromPurchase();
 
         if (originalPurchase != null) {
-            dto.setRenewedFromPurchaseId(originalPurchase.getPurchaseId());
+
+            dto.setRenewedFromPurchaseId(
+                    originalPurchase.getPurchaseId());
 
             Policy originalPolicy = originalPurchase.getPolicy();
+
             if (originalPolicy != null) {
-                dto.setRenewedFromPolicyNumber(originalPolicy.getPolicyNumber());
+                dto.setRenewedFromPolicyNumber(
+                        originalPolicy.getPolicyNumber());
             }
         }
 
@@ -696,8 +742,7 @@ public class PolicyPurchaseService {
                     policy.getDurationYears());
 
             if (policy.getPolicyHolder() != null
-                    && policy.getPolicyHolder()
-                            .getUser() != null) {
+                    && policy.getPolicyHolder().getUser() != null) {
 
                 dto.setUsername(
                         policy.getPolicyHolder()
@@ -717,6 +762,26 @@ public class PolicyPurchaseService {
 
         dto.setNomineeContact(
                 purchase.getNomineeContact());
+
+        // =====================================================
+        // APPLICATION DETAILS
+        // =====================================================
+
+        dto.setApplicationDetails(
+                copyApplicationDetails(
+                        purchase.getApplicationDetails()));
+
+        // =====================================================
+        // FAMILY MEMBERS
+        // =====================================================
+
+        dto.setFamilyMembers(
+                toFamilyMemberDtos(
+                        purchase.getFamilyMembers()));
+
+        // =====================================================
+        // PAYMENT DETAILS
+        // =====================================================
 
         dto.setPaymentMethod(
                 purchase.getPaymentMethod());
@@ -782,10 +847,6 @@ public class PolicyPurchaseService {
         dto.setRefundDateTime(
                 purchase.getRefundDateTime());
 
-        // Match the rules enforced by RefundPreparationService.
-        // The refund deadline is informational even when
-        // the purchase is no longer eligible.
-
         LocalDateTime paidAt = purchase.getPaymentDateTime();
 
         LocalDateTime deadline = paidAt == null
@@ -825,7 +886,121 @@ public class PolicyPurchaseService {
     }
 
     // =========================================================
-    // HELPERS
+    // APPLICATION DETAILS HELPERS
+    // =========================================================
+
+    private Map<String, Object> copyApplicationDetails(
+            Map<String, Object> details) {
+
+        if (details == null || details.isEmpty()) {
+            return null;
+        }
+
+        return new LinkedHashMap<>(details);
+    }
+
+    // =========================================================
+    // FAMILY MEMBER DTO TO ENTITY MAP
+    // =========================================================
+
+    private List<Map<String, Object>> toFamilyMemberMaps(
+            List<PurchasePolicyDto.FamilyMemberDto> members) {
+
+        if (members == null || members.isEmpty()) {
+            return null;
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (PurchasePolicyDto.FamilyMemberDto member : members) {
+
+            Map<String, Object> item = new LinkedHashMap<>();
+
+            item.put("name", trimToNull(member.getName()));
+            item.put("relation", trimToNull(member.getRelation()));
+            item.put("dateOfBirth", member.getDateOfBirth());
+            item.put("gender", trimToNull(member.getGender()));
+            item.put("occupation", trimToNull(member.getOccupation()));
+
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    // =========================================================
+    // FAMILY MEMBER ENTITY MAP TO DTO
+    // =========================================================
+
+    private List<PurchasePolicyDto.FamilyMemberDto> toFamilyMemberDtos(
+            List<Map<String, Object>> members) {
+
+        if (members == null || members.isEmpty()) {
+            return null;
+        }
+
+        List<PurchasePolicyDto.FamilyMemberDto> result =
+                new ArrayList<>();
+
+        for (Map<String, Object> item : members) {
+
+            if (item == null) {
+                continue;
+            }
+
+            PurchasePolicyDto.FamilyMemberDto member =
+                    new PurchasePolicyDto.FamilyMemberDto();
+
+            member.setName(stringValue(item.get("name")));
+            member.setRelation(stringValue(item.get("relation")));
+            member.setDateOfBirth(
+                    localDateValue(item.get("dateOfBirth")));
+            member.setGender(stringValue(item.get("gender")));
+            member.setOccupation(stringValue(item.get("occupation")));
+
+            result.add(member);
+        }
+
+        return result;
+    }
+
+    private String stringValue(Object value) {
+
+        if (value == null) {
+            return null;
+        }
+
+        String result = String.valueOf(value);
+
+        return result.isBlank() ? null : result;
+    }
+
+    private LocalDate localDateValue(Object value) {
+
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof LocalDate date) {
+            return date;
+        }
+
+        if (value instanceof java.sql.Date date) {
+            return date.toLocalDate();
+        }
+
+        try {
+            return LocalDate.parse(String.valueOf(value));
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Could not convert stored family member date of birth: {}",
+                    value);
+            return null;
+        }
+    }
+
+    // =========================================================
+    // GENERAL HELPERS
     // =========================================================
 
     private boolean isBlank(String value) {
