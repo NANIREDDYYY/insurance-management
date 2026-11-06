@@ -1,4 +1,3 @@
-
 import React, { useId, useMemo, useState } from 'react'
 
 import {
@@ -12,7 +11,7 @@ import {
 
 import { inr, inrShort } from '../lib/format'
 
-const ACTIVE_PLANS = PLANS.filter((plan) => plan.active !== false)
+const ACTIVE_PLANS = PLANS.filter((plan) => plan.active === true)
 
 const C = {
   green: '#047857',
@@ -27,7 +26,9 @@ const C = {
 
 const clamp = (value, min, max) => {
   const number = Number(value)
+
   if (!Number.isFinite(number)) return min
+
   return Math.min(Math.max(number, min), max)
 }
 
@@ -46,6 +47,7 @@ const styles = {
     fontFamily: 'inherit',
     overflowWrap: 'anywhere',
   },
+
   header: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -53,10 +55,12 @@ const styles = {
     gap: 10,
     marginBottom: 18,
   },
+
   heading: {
     flex: 1,
     minWidth: 0,
   },
+
   eyebrow: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -68,6 +72,7 @@ const styles = {
     fontWeight: 800,
     letterSpacing: 1.1,
   },
+
   dot: {
     width: 7,
     height: 7,
@@ -76,6 +81,7 @@ const styles = {
     background: '#10b981',
     boxShadow: '0 0 0 3px #d1fae5',
   },
+
   title: {
     margin: 0,
     color: C.deep,
@@ -85,6 +91,7 @@ const styles = {
     lineHeight: 1.25,
     overflowWrap: 'anywhere',
   },
+
   description: {
     maxWidth: 420,
     margin: '7px 0 0',
@@ -92,6 +99,7 @@ const styles = {
     fontSize: 12,
     lineHeight: 1.6,
   },
+
   shield: {
     display: 'grid',
     width: 40,
@@ -103,22 +111,26 @@ const styles = {
     border: '1px solid #d1fae5',
     borderRadius: 12,
   },
+
   section: {
     minWidth: 0,
     marginTop: 17,
   },
+
   label: {
     display: 'block',
     color: '#53675c',
     fontSize: 11,
     fontWeight: 700,
   },
+
   planOptions: {
     display: 'flex',
     flexWrap: 'wrap',
     gap: 7,
     marginTop: 9,
   },
+
   planChip: {
     maxWidth: '100%',
     padding: '8px 10px',
@@ -133,12 +145,14 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 180ms ease',
   },
+
   planChipActive: {
     color: C.white,
     background: 'linear-gradient(135deg,#047857,#059669)',
     borderColor: 'transparent',
     boxShadow: '0 4px 11px rgba(4,120,87,0.16)',
   },
+
   premium: {
     display: 'flex',
     alignItems: 'center',
@@ -151,15 +165,18 @@ const styles = {
       'linear-gradient(120deg,#064e3b 0%,#047857 55%,#059669 100%)',
     borderRadius: 14,
   },
+
   premiumMain: {
     flex: '1 1 140px',
     minWidth: 0,
   },
+
   premiumLabel: {
     color: '#d1fae5',
     fontSize: 11,
     fontWeight: 700,
   },
+
   price: {
     marginTop: 6,
     fontSize: 'clamp(23px, 3vw, 32px)',
@@ -169,12 +186,14 @@ const styles = {
     overflowWrap: 'anywhere',
     fontVariantNumeric: 'tabular-nums',
   },
+
   caption: {
     display: 'block',
     marginTop: 5,
     color: '#d1fae5',
     fontSize: 11,
   },
+
   priceTag: {
     display: 'flex',
     minWidth: 0,
@@ -187,17 +206,20 @@ const styles = {
     border: '1px solid rgba(255,255,255,0.2)',
     borderRadius: 10,
   },
+
   priceTagLabel: {
     color: '#d1fae5',
     fontSize: 10,
     fontWeight: 600,
   },
+
   priceTagValue: {
     fontSize: 'clamp(13px, 1.6vw, 15px)',
     fontWeight: 800,
     overflowWrap: 'anywhere',
     fontVariantNumeric: 'tabular-nums',
   },
+
   controlHeading: {
     display: 'flex',
     alignItems: 'center',
@@ -206,6 +228,7 @@ const styles = {
     gap: 8,
     marginBottom: 10,
   },
+
   controlValue: {
     color: '#065f46',
     fontSize: 13,
@@ -213,6 +236,7 @@ const styles = {
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums',
   },
+
   range: {
     display: 'block',
     width: '100%',
@@ -223,6 +247,7 @@ const styles = {
     accentColor: C.green,
     cursor: 'pointer',
   },
+
   rangeLabels: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -232,6 +257,7 @@ const styles = {
     fontSize: 10,
     fontWeight: 600,
   },
+
   breakdown: {
     minWidth: 0,
     marginTop: 17,
@@ -240,6 +266,7 @@ const styles = {
     border: '1px solid #e4eee7',
     borderRadius: 12,
   },
+
   breakdownHeading: {
     display: 'flex',
     alignItems: 'center',
@@ -251,6 +278,7 @@ const styles = {
     fontSize: 12,
     fontWeight: 800,
   },
+
   estimateTag: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -262,6 +290,7 @@ const styles = {
     fontSize: 9,
     fontWeight: 750,
   },
+
   breakdownRow: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -272,6 +301,7 @@ const styles = {
     fontSize: 11,
     lineHeight: 1.45,
   },
+
   breakdownValue: {
     flex: '0 1 auto',
     minWidth: 0,
@@ -281,6 +311,7 @@ const styles = {
     overflowWrap: 'anywhere',
     fontVariantNumeric: 'tabular-nums',
   },
+
   totalRow: {
     marginTop: 4,
     paddingTop: 12,
@@ -289,14 +320,17 @@ const styles = {
     fontSize: 12,
     fontWeight: 800,
   },
+
   totalValue: {
     color: C.green,
     fontSize: 15,
     fontWeight: 850,
   },
+
   discount: {
     color: C.green,
   },
+
   disclaimer: {
     margin: '12px 0 0',
     color: '#77857c',
@@ -320,6 +354,7 @@ export default function CoverageDial({
   durationMax = MAX_YEARS,
 }) {
   const id = useId()
+
   const [hoveredPlan, setHoveredPlan] = useState(null)
 
   const coverageId = `${id}-coverage`
@@ -359,7 +394,11 @@ export default function CoverageDial({
     maxCoverage,
   )
 
-  const years = clamp(value.years ?? 1, 1, maxDuration)
+  const years = clamp(
+    value.years ?? 1,
+    1,
+    maxDuration,
+  )
 
   const calculatedEstimate = useMemo(
     () => estimate(selectedPlan?.key, coverage, years),
@@ -387,7 +426,11 @@ export default function CoverageDial({
   const updateCoverage = (nextCoverage) => {
     onChange?.({
       ...value,
-      coverage: clamp(nextCoverage, minCoverage, maxCoverage),
+      coverage: clamp(
+        nextCoverage,
+        minCoverage,
+        maxCoverage,
+      ),
       years,
     })
   }
@@ -396,12 +439,21 @@ export default function CoverageDial({
     onChange?.({
       ...value,
       coverage,
-      years: clamp(nextYears, 1, maxDuration),
+      years: clamp(
+        nextYears,
+        1,
+        maxDuration,
+      ),
     })
   }
 
   const choosePlan = (nextPlanKey) => {
-    if (lockedPlan || nextPlanKey === selectedPlan?.key) return
+    if (
+      lockedPlan ||
+      nextPlanKey === selectedPlan?.key
+    ) {
+      return
+    }
 
     const nextPlan = ACTIVE_PLANS.find(
       (plan) => plan.key === nextPlanKey,
@@ -411,7 +463,11 @@ export default function CoverageDial({
 
     onChange?.({
       ...value,
-      coverage: clamp(nextPlan.coverage, minCoverage, maxCoverage),
+      coverage: clamp(
+        nextPlan.coverage,
+        minCoverage,
+        maxCoverage,
+      ),
       years,
     })
 
@@ -425,11 +481,21 @@ export default function CoverageDial({
     valueStyle = {},
   ) => (
     <div style={{ ...styles.breakdownRow, ...extraStyle }}>
-      <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+      <span
+        style={{
+          minWidth: 0,
+          overflowWrap: 'anywhere',
+        }}
+      >
         {label}
       </span>
 
-      <strong style={{ ...styles.breakdownValue, ...valueStyle }}>
+      <strong
+        style={{
+          ...styles.breakdownValue,
+          ...valueStyle,
+        }}
+      >
         {amount}
       </strong>
     </div>
@@ -448,7 +514,9 @@ export default function CoverageDial({
             INSUREX PREMIUM ESTIMATOR
           </span>
 
-          <h3 style={styles.title}>{displayPlanName}</h3>
+          <h3 style={styles.title}>
+            {displayPlanName}
+          </h3>
 
           <p style={styles.description}>
             Personalize your coverage and policy term to estimate
@@ -456,7 +524,10 @@ export default function CoverageDial({
           </p>
         </div>
 
-        <div style={styles.shield} aria-hidden="true">
+        <div
+          style={styles.shield}
+          aria-hidden="true"
+        >
           <svg
             viewBox="0 0 24 24"
             width="22"
@@ -481,7 +552,9 @@ export default function CoverageDial({
             marginBottom: 17,
           }}
         >
-          <span style={styles.label}>Choose your plan</span>
+          <span style={styles.label}>
+            Choose your plan
+          </span>
 
           <div
             role="group"
@@ -530,7 +603,10 @@ export default function CoverageDial({
             Estimated total premium
           </span>
 
-          <div style={styles.price} aria-live="polite">
+          <div
+            style={styles.price}
+            aria-live="polite"
+          >
             {inr(total)}
           </div>
 
@@ -540,9 +616,14 @@ export default function CoverageDial({
         </div>
 
         <div style={styles.priceTag}>
-          <span style={styles.priceTagLabel}>Average per year</span>
+          <span style={styles.priceTagLabel}>
+            Average per year
+          </span>
 
-          <strong style={styles.priceTagValue} aria-live="polite">
+          <strong
+            style={styles.priceTagValue}
+            aria-live="polite"
+          >
             {inr(perYear)}
           </strong>
         </div>
@@ -550,11 +631,17 @@ export default function CoverageDial({
 
       <div style={styles.section}>
         <div style={styles.controlHeading}>
-          <label htmlFor={coverageId} style={styles.label}>
+          <label
+            htmlFor={coverageId}
+            style={styles.label}
+          >
             Coverage amount
           </label>
 
-          <output htmlFor={coverageId} style={styles.controlValue}>
+          <output
+            htmlFor={coverageId}
+            style={styles.controlValue}
+          >
             {inrShort(coverage)}
           </output>
         </div>
@@ -566,7 +653,9 @@ export default function CoverageDial({
           max={maxCoverage}
           step={stepCoverage}
           value={coverage}
-          onChange={(event) => updateCoverage(event.target.value)}
+          onChange={(event) =>
+            updateCoverage(event.target.value)
+          }
           aria-label="Coverage amount"
           aria-valuetext={inr(coverage)}
           style={styles.range}
@@ -580,11 +669,17 @@ export default function CoverageDial({
 
       <div style={styles.section}>
         <div style={styles.controlHeading}>
-          <label htmlFor={yearsId} style={styles.label}>
+          <label
+            htmlFor={yearsId}
+            style={styles.label}
+          >
             Policy duration
           </label>
 
-          <output htmlFor={yearsId} style={styles.controlValue}>
+          <output
+            htmlFor={yearsId}
+            style={styles.controlValue}
+          >
             {years} {years === 1 ? 'year' : 'years'}
           </output>
         </div>
@@ -596,16 +691,21 @@ export default function CoverageDial({
           max={maxDuration}
           step={1}
           value={years}
-          onChange={(event) => updateYears(event.target.value)}
+          onChange={(event) =>
+            updateYears(event.target.value)
+          }
           aria-label="Policy duration in years"
-          aria-valuetext={`${years} ${years === 1 ? 'year' : 'years'}`}
+          aria-valuetext={`${years} ${
+            years === 1 ? 'year' : 'years'
+          }`}
           style={styles.range}
         />
 
         <div style={styles.rangeLabels}>
           <span>1 year</span>
           <span>
-            {maxDuration} {maxDuration === 1 ? 'year' : 'years'}
+            {maxDuration}{' '}
+            {maxDuration === 1 ? 'year' : 'years'}
           </span>
         </div>
       </div>
@@ -620,16 +720,22 @@ export default function CoverageDial({
           </span>
         </div>
 
-        {renderBreakdownRow('Base premium', inr(base))}
+        {renderBreakdownRow(
+          'Base premium',
+          inr(base),
+        )}
 
         {renderBreakdownRow(
-          `Multi-year discount ${years >= 2 ? '(5%)' : ''}`,
+          `Multi-year discount ${discount > 0 ? '(5%)' : ''}`,
           discount > 0 ? `−${inr(discount)}` : inr(0),
           {},
           discount > 0 ? styles.discount : {},
         )}
 
-        {renderBreakdownRow(`GST (${gstRate}%)`, inr(gst))}
+        {renderBreakdownRow(
+          `GST (${gstRate}%)`,
+          inr(gst),
+        )}
 
         {renderBreakdownRow(
           'Estimated payable',
@@ -640,10 +746,9 @@ export default function CoverageDial({
       </div>
 
       <p style={styles.disclaimer}>
-        This is an estimate calculated proportionally from the
-        selected plan's listed coverage and annual premium. A 5%
-        multi-year discount is estimated for terms of two years or
-        more. Final pricing and applicable taxes are confirmed
+        This is an indicative estimate based on the selected
+        plan, coverage and policy term. InsureX's backend
+        determines the final payable amount and applicable taxes
         during purchase.
       </p>
     </section>
