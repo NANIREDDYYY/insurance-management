@@ -4,6 +4,8 @@ package com.htc.insurance.entity;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,6 +18,9 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -60,28 +65,6 @@ public class PolicyPurchase {
     // POLICY RENEWAL
     // =========================================================
 
-    /*
-     * Links a renewed purchase to its original purchase.
-     *
-     * NORMAL PURCHASE:
-     * renewedFromPurchase = null
-     *
-     * RENEWAL PURCHASE:
-     * renewedFromPurchase = original PolicyPurchase
-     *
-     * Each renewal creates a NEW Policy and PolicyPurchase.
-     *
-     * Original policy, claims, payments and settlements
-     * remain unchanged for historical records.
-     *
-     * The unique constraint prevents more than one
-     * saved renewal purchase referencing the same
-     * original purchase.
-     *
-     * Multiple abandoned payment attempts are allowed;
-     * uniqueness applies only to saved purchases.
-     */
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
         name = "renewed_from_purchase_id",
@@ -92,22 +75,6 @@ public class PolicyPurchase {
     // =========================================================
     // ORIGINAL INSURANCE PLAN
     // =========================================================
-
-    /*
-     * Stores the verified insurance plan selected
-     * during the original purchase.
-     *
-     * For normal purchases, the value comes from
-     * the verified PaymentAttempt.
-     *
-     * For renewals, the original plan ID is retained.
-     *
-     * Nullable for historical purchases created
-     * before plan ID tracking was introduced.
-     *
-     * Never infer a historical plan ID using only
-     * current premium or coverage values.
-     */
 
     @Column(name = "plan_id")
     private Long planId;
@@ -152,6 +119,41 @@ public class PolicyPurchase {
     private String nomineeContact;
 
     // =========================================================
+    // INSURANCE APPLICATION DETAILS
+    //
+    // Supports:
+    // HEALTH       - medical and applicant information
+    // FAMILY       - primary applicant information
+    // VEHICLE      - registration and vehicle information
+    // LIFE         - applicant and beneficiary information
+    // OTHER        - additional plan-specific information
+    //
+    // Stored as MySQL JSON.
+    // =========================================================
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(
+        name = "application_details",
+        columnDefinition = "json"
+    )
+    private Map<String, Object> applicationDetails;
+
+    // =========================================================
+    // FAMILY MEMBERS
+    //
+    // Stores multiple family members independently.
+    // Each entry can contain name, relation, DOB,
+    // gender, occupation and other relevant details.
+    // =========================================================
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(
+        name = "family_members",
+        columnDefinition = "json"
+    )
+    private List<Map<String, Object>> familyMembers;
+
+    // =========================================================
     // PAYMENT INFORMATION
     // =========================================================
 
@@ -192,18 +194,7 @@ public class PolicyPurchase {
     // REFUND INFORMATION
     // =========================================================
 
-    /*
-     * Expected refund status values:
-     *
-     * NOT_REFUNDED
-     * REFUND_PENDING
-     * REFUND_PROCESSING
-     * REFUNDED
-     * REFUND_FAILED
-     *
-     * Actual transitions are managed by refund services.
-     */
-
+    @Column(length = 50)
     private String refundStatus;
 
     private String refundId;
