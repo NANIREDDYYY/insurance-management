@@ -1,23 +1,3 @@
-// =========================================================
-// INSUREX — MY POLICIES
-// =========================================================
-//
-// Features:
-// - Active, claimed, renewed, inactive, expired policies
-// - Refund pending, processing, refunded and failed statuses
-// - Backend-authoritative policy lifecycle handling
-// - Policy renewal navigation
-// - Duplicate renewal prevention
-// - Claim eligibility checks
-// - Pending claim detection
-// - Automatic refresh for unresolved refunds
-// - Manual refresh
-// - Search and URL-synchronized filters
-// - Responsive policy cards
-//
-// Existing imports, routes and ClaimForm integration preserved.
-//
-// =========================================================
 
 import { useMemo, useState } from 'react'
 
@@ -35,6 +15,9 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  CarFront,
+  HeartPulse,
+  Users,
 } from 'lucide-react'
 
 import {
@@ -68,6 +51,15 @@ const FIELDS = [
   'status',
   'lifecycleStatus',
   'refundStatus',
+  'planName',
+  'policyType',
+  'planType',
+  'category',
+  'vehicleNumber',
+  'registrationNumber',
+  'vehicleRegistrationNumber',
+  'vehicleModel',
+  'makerModel',
 ]
 
 const SUCCESSFUL_CLAIM_STATUSES = new Set([
@@ -117,6 +109,13 @@ const FILTER_OPTIONS = [
   { value: 'renewed', label: 'Renewed' },
   { value: 'inactive', label: 'Inactive' },
   { value: 'expired', label: 'Expired' },
+]
+
+const CATEGORY_OPTIONS = [
+  { value: 'all', label: 'All plans' },
+  { value: 'health', label: 'Health' },
+  { value: 'family', label: 'Family' },
+  { value: 'vehicle', label: 'Vehicle' },
 ]
 
 const REFRESH_INTERVAL = 15000
@@ -186,10 +185,108 @@ function getPurchaseRenewalSource(purchase) {
 }
 
 function isSuccessfulPurchase(purchase) {
-  return (
-    normalizedStatus(purchase?.paymentStatus) ===
-    'PAID'
+  return normalizedStatus(purchase?.paymentStatus) === 'PAID'
+}
+
+/* =========================================================
+   PLAN CATEGORY DETECTION
+
+   Uses available policy/plan information.
+   Vehicle takes priority over Family, then Health.
+========================================================= */
+
+function getPolicyCategory(policy) {
+  const values = [
+    policy?.category,
+    policy?.planCategory,
+    policy?.policyCategory,
+    policy?.policyType,
+    policy?.planType,
+    policy?.plan?.category,
+    policy?.plan?.planType,
+    policy?.plan?.policyType,
+    policy?.planName,
+    policy?.plan?.name,
+    policy?.coveredTypes,
+    policy?.coverageType,
+    policy?.insuranceType,
+    policy?.productType,
+  ]
+
+  const text = values
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .replace(/[_-]/g, ' ')
+
+  // Vehicle-specific details also identify a motor policy.
+  const hasVehicleDetails = Boolean(
+    policy?.vehicleNumber ||
+    policy?.registrationNumber ||
+    policy?.vehicleRegistrationNumber ||
+    policy?.vehicle?.registrationNumber ||
+    policy?.vehicle?.vehicleNumber ||
+    policy?.vehicleModel ||
+    policy?.makerModel ||
+    policy?.vehicle?.model
   )
+
+  if (
+    /\b(vehicle|motor|motorcycle|car|bike|two wheeler|four wheeler|automobile)\b/.test(text) ||
+    hasVehicleDetails
+  ) {
+    return 'vehicle'
+  }
+
+  if (
+    /\b(family|family floater|dependents|dependent)\b/.test(text)
+  ) {
+    return 'family'
+  }
+
+  if (
+    /\b(health|medical|hospital|mediclaim)\b/.test(text)
+  ) {
+    return 'health'
+  }
+
+  return 'other'
+}
+
+function getVehicleRegistration(policy) {
+  return (
+    policy?.vehicleRegistrationNumber ??
+    policy?.registrationNumber ??
+    policy?.vehicleNumber ??
+    policy?.vehicle?.registrationNumber ??
+    policy?.vehicle?.vehicleNumber ??
+    policy?.vehicleDetails?.registrationNumber ??
+    null
+  )
+}
+
+function getVehicleModel(policy) {
+  return (
+    policy?.vehicleModel ??
+    policy?.makerModel ??
+    policy?.vehicle?.model ??
+    policy?.vehicle?.makerModel ??
+    policy?.vehicleDetails?.vehicleModel ??
+    null
+  )
+}
+
+function getCategoryLabel(category) {
+  switch (category) {
+    case 'health':
+      return 'Health Insurance'
+    case 'family':
+      return 'Family Insurance'
+    case 'vehicle':
+      return 'Vehicle Insurance'
+    default:
+      return 'Insurance Policy'
+  }
 }
 
 /* =========================================================
@@ -209,8 +306,6 @@ function getRefundStatus(policy, purchase) {
     policy?.lifecycleStatus,
   )
 
-  // A purchase refund status is the preferred source
-  // for displaying the actual payment refund.
   if (purchaseStatus && purchaseStatus !== 'NOT_REFUNDED') {
     return purchaseStatus
   }
@@ -230,21 +325,15 @@ function getRefundStatus(policy, purchase) {
 }
 
 function isRefundPending(status) {
-  return REFUND_PENDING_STATUSES.has(
-    normalizedStatus(status),
-  )
+  return REFUND_PENDING_STATUSES.has(normalizedStatus(status))
 }
 
 function isRefunded(status) {
-  return REFUNDED_STATUSES.has(
-    normalizedStatus(status),
-  )
+  return REFUNDED_STATUSES.has(normalizedStatus(status))
 }
 
 function isRefundFailed(status) {
-  return REFUND_FAILED_STATUSES.has(
-    normalizedStatus(status),
-  )
+  return REFUND_FAILED_STATUSES.has(normalizedStatus(status))
 }
 
 function refundStatusLabel(status) {
@@ -279,8 +368,6 @@ function refundStatusLabel(status) {
    RENEWAL HELPERS
 ========================================================= */
 
-// A renewal child is a separate policy, whose own lifecycle determines
-// whether its coverage is active. A refunded renewal is historical only.
 function isRenewedPolicy(policy, purchase) {
   return (
     getRenewalSourceNumber(policy) != null ||
@@ -289,9 +376,7 @@ function isRenewedPolicy(policy, purchase) {
 }
 
 function renewalUrl(policyNumber) {
-  return `/app/renew/${encodeURIComponent(
-    String(policyNumber),
-  )}`
+  return `/app/renew/${encodeURIComponent(String(policyNumber))}`
 }
 
 /* =========================================================
@@ -333,15 +418,11 @@ function hasSuccessfulClaim(policy, relatedClaims) {
 }
 
 function isPendingClaim(policy, relatedClaims) {
-  const embeddedStatuses = Array.isArray(
-    policy?.claims,
-  )
+  const embeddedStatuses = Array.isArray(policy?.claims)
     ? policy.claims.map((claim) =>
         normalizedStatus(claim?.status),
       )
-    : [
-        normalizedStatus(policy?.claimStatus),
-      ]
+    : [normalizedStatus(policy?.claimStatus)]
 
   return (
     embeddedStatuses.some((status) =>
@@ -357,46 +438,23 @@ function isPendingClaim(policy, relatedClaims) {
 
 /* =========================================================
    POLICY STATUS
-
-   Refund lifecycle takes priority over ordinary
-   ACTIVE / CLAIMED / EXPIRED display states.
 ========================================================= */
 
-function getPolicyStatus(
-  policy,
-  relatedClaims,
-  relatedPurchase,
-) {
-  const backendStatus = normalizedStatus(
-    policy?.status,
-  )
+function getPolicyStatus(policy, relatedClaims, relatedPurchase) {
+  const backendStatus = normalizedStatus(policy?.status)
+  const lifecycleStatus = normalizedStatus(policy?.lifecycleStatus)
 
-  const lifecycleStatus = normalizedStatus(
-    policy?.lifecycleStatus,
-  )
+  const refundStatus = getRefundStatus(policy, relatedPurchase)
 
-  const refundStatus = getRefundStatus(
-    policy,
-    relatedPurchase,
-  )
-
-  if (
-    isRefunded(refundStatus) ||
-    lifecycleStatus === 'REFUNDED'
-  ) {
+  if (isRefunded(refundStatus) || lifecycleStatus === 'REFUNDED') {
     return 'REFUNDED'
   }
 
-  // The purchase's verified failed outcome overrides the policy's
-  // deliberately retained REFUND_PENDING lifecycle.
   if (isRefundFailed(refundStatus)) {
     return 'REFUND_FAILED'
   }
 
-  if (
-    isRefundPending(refundStatus) ||
-    isRefundPending(lifecycleStatus)
-  ) {
+  if (isRefundPending(refundStatus) || isRefundPending(lifecycleStatus)) {
     if (
       refundStatus === 'REFUND_REQUIRES_RECONCILIATION' ||
       refundStatus === 'REQUIRES_RECONCILIATION' ||
@@ -430,24 +488,16 @@ function getPolicyStatus(
     return 'RENEWED'
   }
 
-  // Respect explicit non-active backend lifecycle states.
   if (
     lifecycleStatus &&
-    ![
-      'ACTIVE',
-      'INACTIVE',
-      'NEW',
-    ].includes(lifecycleStatus)
+    !['ACTIVE', 'INACTIVE', 'NEW'].includes(lifecycleStatus)
   ) {
     return lifecycleStatus
   }
 
   if (
     backendStatus &&
-    ![
-      'ACTIVE',
-      'INACTIVE',
-    ].includes(backendStatus)
+    !['ACTIVE', 'INACTIVE'].includes(backendStatus)
   ) {
     return backendStatus
   }
@@ -467,8 +517,7 @@ function getPolicyStatus(
     return 'INACTIVE'
   }
 
-  return policy?.isActive === true ||
-    backendStatus === 'ACTIVE'
+  return policy?.isActive === true || backendStatus === 'ACTIVE'
     ? 'ACTIVE'
     : 'INACTIVE'
 }
@@ -481,12 +530,7 @@ function PolicyStatusBadge({ policy }) {
   const status = policy.displayStatus
 
   if (status === 'REFUNDED') {
-    return (
-      <StatusBadge
-        value="REFUNDED"
-        label="Refunded"
-      />
-    )
+    return <StatusBadge value="REFUNDED" label="Refunded" />
   }
 
   if (isRefundPending(status)) {
@@ -499,29 +543,18 @@ function PolicyStatusBadge({ policy }) {
   }
 
   if (isRefundFailed(status)) {
-    return (
-      <StatusBadge
-        value="FAILED"
-        label="Refund failed"
-      />
-    )
+    return <StatusBadge value="FAILED" label="Refund failed" />
   }
 
-  return (
-    <StatusBadge value={status} />
-  )
+  return <StatusBadge value={status} />
 }
 
 /* =========================================================
-   ACTION COMPONENT
+   POLICY ACTION
 ========================================================= */
 
 function PolicyAction({ policy, onClaim }) {
-  if (
-    policy.refundPending ||
-    policy.refunded ||
-    policy.refundFailed
-  ) {
+  if (policy.refundPending || policy.refunded || policy.refundFailed) {
     return (
       <span className="muted ix-policy-action-label">
         {refundStatusLabel(policy.refundStatus)}
@@ -529,7 +562,6 @@ function PolicyAction({ policy, onClaim }) {
     )
   }
 
-  // An original policy that was replaced by a renewal cannot be claimed again.
   if (policy.alreadyRenewed) {
     return (
       <span className="muted ix-policy-action-label">
@@ -563,12 +595,10 @@ function PolicyAction({ policy, onClaim }) {
               ? 'Claims cannot be started for an expired policy'
               : policy.isActive === false
                 ? 'This policy is not active'
-              : 'Claims require an active policy'
+                : 'Claims require an active policy'
       }
       onClick={() => {
-        if (policy.canFileClaim) {
-          onClaim(policy)
-        }
+        if (policy.canFileClaim) onClaim(policy)
       }}
     >
       {policy.displayStatus === 'EXPIRED'
@@ -583,18 +613,40 @@ function PolicyAction({ policy, onClaim }) {
 }
 
 /* =========================================================
+   CATEGORY ICON
+========================================================= */
+
+function CategoryIcon({ category }) {
+  if (category === 'vehicle') {
+    return <CarFront size={17} />
+  }
+
+  if (category === 'family') {
+    return <Users size={17} />
+  }
+
+  return <HeartPulse size={17} />
+}
+
+/* =========================================================
    COMPONENT
 ========================================================= */
 
 export default function MyPolicies() {
-  const [searchParams, setSearchParams] =
-    useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const requestedFilter =
-    searchParams.get('status') || 'all'
+  const requestedFilter = searchParams.get('status') || 'all'
 
   const status = VALID_FILTERS.has(requestedFilter)
     ? requestedFilter
+    : 'all'
+
+  const requestedCategory = searchParams.get('category') || 'all'
+
+  const category = CATEGORY_OPTIONS.some(
+    (option) => option.value === requestedCategory,
+  )
+    ? requestedCategory
     : 'all'
 
   const claimedSection = status === 'claimed'
@@ -613,8 +665,7 @@ export default function MyPolicies() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    // Pick up newly completed purchases without requiring a page reload.
-    refetchInterval: 30_000,
+    refetchInterval: 30000,
     refetchIntervalInBackground: false,
   })
 
@@ -634,13 +685,10 @@ export default function MyPolicies() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
 
-    // Only poll while there are unresolved refunds.
     refetchInterval: (query) => {
-      const purchaseRows = normalizeRows(
-        query.state.data,
-      )
+      const rows = normalizeRows(query.state.data)
 
-      return purchaseRows.some((purchase) =>
+      return rows.some((purchase) =>
         isRefundPending(purchase.refundStatus),
       )
         ? REFRESH_INTERVAL
@@ -651,7 +699,7 @@ export default function MyPolicies() {
   })
 
   /* =======================================================
-     NORMALIZE RESPONSE DATA
+     NORMALIZE DATA
   ======================================================= */
 
   const policyRows = useMemo(
@@ -670,30 +718,28 @@ export default function MyPolicies() {
   )
 
   /* =======================================================
-     PAID PURCHASE / POLICY SYNCHRONIZATION
-
-     Do not fabricate policies or change ACTIVE / RENEWED
-     counts. Surface paid purchases whose linked policy is
-     absent from the authoritative policies response.
+     PAID PURCHASE SYNCHRONIZATION
   ======================================================= */
 
   const unlinkedPaidPurchases = useMemo(() => {
     const knownPolicyNumbers = new Set(
       policyRows
-        .map((policy) => policyNumberOf(policy))
+        .map(policyNumberOf)
         .filter((number) => number != null)
         .map(String),
     )
 
     return purchaseRows.filter((purchase) => {
       if (!isSuccessfulPurchase(purchase)) return false
+
       const number = policyNumberOf(purchase)
+
       return number != null && !knownPolicyNumbers.has(String(number))
     })
   }, [policyRows, purchaseRows])
 
   /* =======================================================
-     INDEX CLAIMS BY POLICY
+     INDEX CLAIMS
   ======================================================= */
 
   const claimsByPolicy = useMemo(() => {
@@ -701,14 +747,11 @@ export default function MyPolicies() {
 
     for (const claim of claimRows) {
       const number = claimPolicyNumber(claim)
-
       if (number == null) continue
 
       const key = String(number)
 
-      if (!map.has(key)) {
-        map.set(key, [])
-      }
+      if (!map.has(key)) map.set(key, [])
 
       map.get(key).push(claim)
     }
@@ -717,7 +760,7 @@ export default function MyPolicies() {
   }, [claimRows])
 
   /* =======================================================
-     INDEX PURCHASES BY POLICY
+     INDEX PURCHASES
   ======================================================= */
 
   const purchasesByPolicy = useMemo(() => {
@@ -725,7 +768,6 @@ export default function MyPolicies() {
 
     for (const purchase of purchaseRows) {
       const number = policyNumberOf(purchase)
-
       if (number == null) continue
 
       const key = String(number)
@@ -744,11 +786,7 @@ export default function MyPolicies() {
   }, [purchaseRows])
 
   /* =======================================================
-     TRACK COMPLETED RENEWALS
-
-     A source policy counts as already renewed only
-     when the linked renewal purchase was paid or
-     the backend policy explicitly records renewal.
+     COMPLETED RENEWALS
   ======================================================= */
 
   const renewedSourceNumbers = useMemo(() => {
@@ -757,18 +795,13 @@ export default function MyPolicies() {
     for (const policy of policyRows) {
       const source = getRenewalSourceNumber(policy)
 
-      if (source != null) {
-        set.add(String(source))
-      }
+      if (source != null) set.add(String(source))
     }
 
     for (const purchase of purchaseRows) {
       const source = getPurchaseRenewalSource(purchase)
 
-      if (
-        source != null &&
-        isSuccessfulPurchase(purchase)
-      ) {
+      if (source != null && isSuccessfulPurchase(purchase)) {
         set.add(String(source))
       }
     }
@@ -777,26 +810,18 @@ export default function MyPolicies() {
   }, [policyRows, purchaseRows])
 
   /* =======================================================
-     ENRICH POLICY DATA
+     ENRICH POLICIES
   ======================================================= */
 
   const enrichedPolicies = useMemo(
     () =>
       policyRows.map((policy) => {
-        const number = String(
-          policy.policyNumber,
-        )
+        const number = String(policy.policyNumber)
 
-        const relatedClaims =
-          claimsByPolicy.get(number) || []
+        const relatedClaims = claimsByPolicy.get(number) || []
+        const relatedPurchase = purchasesByPolicy.get(number) || null
 
-        const relatedPurchase =
-          purchasesByPolicy.get(number) || null
-
-        const refundStatus = getRefundStatus(
-          policy,
-          relatedPurchase,
-        )
+        const refundStatus = getRefundStatus(policy, relatedPurchase)
 
         const baseStatus = getPolicyStatus(
           policy,
@@ -804,10 +829,7 @@ export default function MyPolicies() {
           relatedPurchase,
         )
 
-        // A completed, paid renewal supersedes CLAIMED for the
-        // original policy, but never hides a refund lifecycle.
-        const alreadyRenewed =
-          renewedSourceNumbers.has(number)
+        const alreadyRenewed = renewedSourceNumbers.has(number)
 
         const displayStatus =
           alreadyRenewed &&
@@ -817,7 +839,6 @@ export default function MyPolicies() {
             ? 'RENEWED'
             : baseStatus
 
-        // Claim history is separate from the effective lifecycle status.
         const hasClaimHistory =
           relatedClaims.length > 0 ||
           (Array.isArray(policy.claims) && policy.claims.length > 0) ||
@@ -827,38 +848,30 @@ export default function MyPolicies() {
           normalizedStatus(policy.status) === 'CLAIMED' ||
           normalizedStatus(policy.lifecycleStatus) === 'CLAIMED'
 
-        const claimCount = relatedClaims.length || (Array.isArray(policy.claims) ? policy.claims.length : 0)
+        const claimCount =
+          relatedClaims.length ||
+          (Array.isArray(policy.claims) ? policy.claims.length : 0)
 
-        const pendingClaim = isPendingClaim(
-          policy,
-          relatedClaims,
-        )
+        const pendingClaim = isPendingClaim(policy, relatedClaims)
 
-        const renewalChild = isRenewedPolicy(
-          policy,
-          relatedPurchase,
-        )
+        const renewalChild = isRenewedPolicy(policy, relatedPurchase)
 
         const refundPending =
           !isRefundFailed(refundStatus) &&
           !isRefunded(refundStatus) &&
-          (isRefundPending(refundStatus) ||
-            isRefundPending(policy.lifecycleStatus))
+          (
+            isRefundPending(refundStatus) ||
+            isRefundPending(policy.lifecycleStatus)
+          )
 
         const refunded =
           isRefunded(refundStatus) ||
-          normalizedStatus(policy.lifecycleStatus) ===
-            'REFUNDED'
+          normalizedStatus(policy.lifecycleStatus) === 'REFUNDED'
 
         const refundFailed =
           isRefundFailed(refundStatus) ||
-          normalizedStatus(policy.lifecycleStatus) ===
-            'REFUND_FAILED'
+          normalizedStatus(policy.lifecycleStatus) === 'REFUND_FAILED'
 
-        // A renewed coverage record can accept claims, but an original
-        // policy superseded by renewal cannot. Always use this policy's
-        // own policyNumber in ClaimForm; never redirect to the old number.
-        // Coverage expiry is exclusive, matching PolicyService.hasExpired().
         const coverageCurrentlyValid =
           Boolean(policy.startDate && policy.expiryDate) &&
           String(policy.startDate).slice(0, 10) <= today() &&
@@ -866,22 +879,20 @@ export default function MyPolicies() {
 
         const coverageActive =
           policy.isActive === true &&
-          ['', 'ACTIVE'].includes(normalizedStatus(policy.lifecycleStatus)) &&
+          ['', 'ACTIVE'].includes(
+            normalizedStatus(policy.lifecycleStatus),
+          ) &&
           coverageCurrentlyValid &&
           !alreadyRenewed &&
           !refundPending &&
           !refunded &&
           !refundFailed
 
-        // Frontend eligibility is advisory; backend rechecks all claim rules.
-        const canFileClaim = coverageActive && !pendingClaim &&
+        const canFileClaim =
+          coverageActive &&
+          !pendingClaim &&
           !hasSuccessfulClaim(policy, relatedClaims)
 
-        // Preserve the existing business rule:
-        // renewal is available for a claimed policy
-        // that has not already been renewed.
-        //
-        // Backend must still validate eligibility.
         const canRequestRenewal =
           displayStatus === 'CLAIMED' &&
           !alreadyRenewed &&
@@ -891,6 +902,8 @@ export default function MyPolicies() {
           !refundPending &&
           !refunded &&
           !refundFailed
+
+        const planCategory = getPolicyCategory(policy)
 
         return {
           ...policy,
@@ -907,6 +920,10 @@ export default function MyPolicies() {
           coverageActive,
           canFileClaim,
           canRequestRenewal,
+          planCategory,
+          categoryLabel: getCategoryLabel(planCategory),
+          vehicleRegistration: getVehicleRegistration(policy),
+          vehicleModel: getVehicleModel(policy),
         }
       }),
     [
@@ -921,29 +938,38 @@ export default function MyPolicies() {
      SEARCH
   ======================================================= */
 
-  const [
-    search,
-    setSearch,
-    searched,
-  ] = useFilter(enrichedPolicies, FIELDS)
+  const [search, setSearch, searched] = useFilter(
+    enrichedPolicies,
+    FIELDS,
+  )
 
   /* =======================================================
-     FILTER
+     CATEGORY FILTER
+  ======================================================= */
+
+  const categoryRows = useMemo(
+    () =>
+      (searched || []).filter((policy) =>
+        category === 'all'
+          ? true
+          : policy.planCategory === category,
+      ),
+    [searched, category],
+  )
+
+  /* =======================================================
+     STATUS FILTER
   ======================================================= */
 
   const rows = useMemo(
     () =>
-      (searched || []).filter((policy) => {
-        if (status === 'all') {
-          return true
-        }
+      categoryRows.filter((policy) => {
+        if (status === 'all') return true
 
         if (status === 'renewed') {
           return policy.displayStatus === 'RENEWED'
         }
 
-        // Include renewed cover in the Active tab as requested.
-        // Refund/expired/inactive statuses remain excluded.
         if (status === 'active') {
           return policy.coverageActive
         }
@@ -952,17 +978,16 @@ export default function MyPolicies() {
           return policy.hasClaimHistory
         }
 
-        return (
-          policy.displayStatus ===
-          status.toUpperCase()
-        )
+        return policy.displayStatus === status.toUpperCase()
       }),
-    [searched, status],
+    [categoryRows, status],
   )
 
-  function changeStatus(nextStatus) {
-    if (!VALID_FILTERS.has(nextStatus)) return
+  /* =======================================================
+     URL FILTERS
+  ======================================================= */
 
+  function updateFilters(nextStatus, nextCategory) {
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous)
 
@@ -972,35 +997,72 @@ export default function MyPolicies() {
         next.set('status', nextStatus)
       }
 
+      if (nextCategory === 'all') {
+        next.delete('category')
+      } else {
+        next.set('category', nextCategory)
+      }
+
       return next
     })
   }
 
+  function changeStatus(nextStatus) {
+    if (!VALID_FILTERS.has(nextStatus)) return
+
+    updateFilters(nextStatus, category)
+  }
+
+  function changeCategory(nextCategory) {
+    if (!CATEGORY_OPTIONS.some((item) => item.value === nextCategory)) {
+      return
+    }
+
+    updateFilters(status, nextCategory)
+  }
+
   /* =======================================================
-     SUMMARY COUNTS
+     SUMMARY
   ======================================================= */
 
   const summary = useMemo(
     () => ({
       total: enrichedPolicies.length,
 
-      // Count real, currently eligible coverage, not history labels.
-      active: enrichedPolicies.filter((p) => p.coverageActive).length,
+      active: enrichedPolicies.filter(
+        (policy) => policy.coverageActive,
+      ).length,
 
       claimed: enrichedPolicies.filter(
-        (p) => p.hasClaimHistory,
+        (policy) => policy.hasClaimHistory,
       ).length,
 
       linkedClaims: claimRows.filter((claim) =>
-        enrichedPolicies.some((p) => String(p.policyNumber) === String(claimPolicyNumber(claim)))
+        enrichedPolicies.some(
+          (policy) =>
+            String(policy.policyNumber) ===
+            String(claimPolicyNumber(claim)),
+        ),
       ).length,
 
       renewed: enrichedPolicies.filter(
-        (p) => p.displayStatus === 'RENEWED',
+        (policy) => policy.displayStatus === 'RENEWED',
       ).length,
 
       refunds: enrichedPolicies.filter(
-        (p) => p.refundPending,
+        (policy) => policy.refundPending,
+      ).length,
+
+      health: enrichedPolicies.filter(
+        (policy) => policy.planCategory === 'health',
+      ).length,
+
+      family: enrichedPolicies.filter(
+        (policy) => policy.planCategory === 'family',
+      ).length,
+
+      vehicle: enrichedPolicies.filter(
+        (policy) => policy.planCategory === 'vehicle',
       ).length,
     }),
     [enrichedPolicies, claimRows],
@@ -1025,13 +1087,9 @@ export default function MyPolicies() {
         purchasesQuery.refetch(),
       ])
 
-      const failure = results.find(
-        (result) => result.error,
-      )
+      const failure = results.find((result) => result.error)
 
-      if (failure) {
-        throw failure.error
-      }
+      if (failure) throw failure.error
     } catch (error) {
       setRefreshError(
         error?.response?.data?.message ||
@@ -1040,10 +1098,6 @@ export default function MyPolicies() {
       )
     }
   }
-
-  /* =======================================================
-     COMBINED QUERY STATUS
-  ======================================================= */
 
   const query = {
     ...policiesQuery,
@@ -1074,19 +1128,19 @@ export default function MyPolicies() {
     <>
       <PageHeader
         title={claimedSection ? 'Claimed policies' : 'My policies'}
-        subtitle={claimedSection
-          ? 'Review policies with claim history, including policies renewed after a claim.'
-          : 'Manage your insurance coverage, track claims, refunds and eligible renewals.'}
+        subtitle={
+          claimedSection
+            ? 'Review policies with claim history, including policies renewed after a claim.'
+            : 'Manage your Health, Family and Vehicle insurance coverage, claims and renewals.'
+        }
       >
-        <Link
-          className="btn primary"
-          to="/app/plans"
-        >
+        <Link className="btn primary" to="/app/plans">
           Buy insurance
         </Link>
       </PageHeader>
 
-      {/* The Claimed Policies sidebar destination has its own focused summary. */}
+      {/* SUMMARY */}
+
       {claimedSection ? (
         <div className="ix-policy-summary-grid">
           <Panel>
@@ -1098,6 +1152,7 @@ export default function MyPolicies() {
               </div>
             </div>
           </Panel>
+
           <Panel>
             <div className="ix-policy-summary-card">
               <CheckCircle2 size={22} />
@@ -1107,158 +1162,206 @@ export default function MyPolicies() {
               </div>
             </div>
           </Panel>
+
           <Panel>
             <div className="ix-policy-summary-card">
               <RefreshCw size={22} />
               <div>
                 <div className="muted">Renewed after claim</div>
-                <strong>{query.isLoading ? '…' : enrichedPolicies.filter(p => p.hasClaimHistory && p.alreadyRenewed).length}</strong>
+                <strong>
+                  {query.isLoading
+                    ? '…'
+                    : enrichedPolicies.filter(
+                        (policy) =>
+                          policy.hasClaimHistory &&
+                          policy.alreadyRenewed,
+                      ).length}
+                </strong>
               </div>
             </div>
           </Panel>
         </div>
       ) : (
-      <div className="ix-policy-summary-grid">
-        <Panel>
-          <div className="ix-policy-summary-card">
-            <ShieldCheck size={22} />
-            <div>
-              <div className="muted">
-                Total policies
+        <>
+          <div className="ix-policy-summary-grid">
+            <Panel>
+              <div className="ix-policy-summary-card">
+                <ShieldCheck size={22} />
+                <div>
+                  <div className="muted">Total policies</div>
+                  <strong>{query.isLoading ? '…' : summary.total}</strong>
+                </div>
               </div>
-              <strong>
-                {query.isLoading ? '…' : summary.total}
-              </strong>
-            </div>
-          </div>
-        </Panel>
+            </Panel>
 
-        <Panel>
-          <div className="ix-policy-summary-card">
-            <CheckCircle2 size={22} />
-            <div>
-              <div className="muted">
-                Active
+            <Panel>
+              <div className="ix-policy-summary-card">
+                <CheckCircle2 size={22} />
+                <div>
+                  <div className="muted">Active</div>
+                  <strong>{query.isLoading ? '…' : summary.active}</strong>
+                </div>
               </div>
-              <strong>
-                {query.isLoading ? '…' : summary.active}
-              </strong>
-            </div>
-          </div>
-        </Panel>
+            </Panel>
 
-        <Panel>
-          <div className="ix-policy-summary-card">
-            <RefreshCw size={22} />
-            <div>
-              <div className="muted">
-                Renewed
+            <Panel>
+              <div className="ix-policy-summary-card">
+                <RefreshCw size={22} />
+                <div>
+                  <div className="muted">Renewed</div>
+                  <strong>{query.isLoading ? '…' : summary.renewed}</strong>
+                </div>
               </div>
-              <strong>
-                {query.isLoading ? '…' : summary.renewed}
-              </strong>
-            </div>
-          </div>
-        </Panel>
+            </Panel>
 
-        <Panel>
-          <div className="ix-policy-summary-card">
-            <RotateCcw size={22} />
-            <div>
-              <div className="muted">
-                Pending refunds
+            <Panel>
+              <div className="ix-policy-summary-card">
+                <RotateCcw size={22} />
+                <div>
+                  <div className="muted">Pending refunds</div>
+                  <strong>{query.isLoading ? '…' : summary.refunds}</strong>
+                </div>
               </div>
-              <strong>
-                {query.isLoading ? '…' : summary.refunds}
-              </strong>
-            </div>
+            </Panel>
           </div>
-        </Panel>
-      </div>
 
+          {/* PLAN CATEGORY SUMMARY */}
+
+          <div className="ix-policy-category-summary">
+            <Panel>
+              <div className="ix-policy-category-item">
+                <HeartPulse size={20} />
+                <div>
+                  <span>Health</span>
+                  <strong>{query.isLoading ? '…' : summary.health}</strong>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel>
+              <div className="ix-policy-category-item">
+                <Users size={20} />
+                <div>
+                  <span>Family</span>
+                  <strong>{query.isLoading ? '…' : summary.family}</strong>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel>
+              <div className="ix-policy-category-item">
+                <CarFront size={20} />
+                <div>
+                  <span>Vehicle</span>
+                  <strong>{query.isLoading ? '…' : summary.vehicle}</strong>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </>
       )}
 
-      {/* A paid purchase must be linked by the backend before it is counted. */}
-      {!query.isLoading && !query.isError && unlinkedPaidPurchases.length > 0 && (
-        <div className="alert info ix-policy-alert" role="status">
-          <Clock3 size={17} />
-          <span>
-            {unlinkedPaidPurchases.length} paid {unlinkedPaidPurchases.length === 1 ? 'purchase has' : 'purchases have'}
-            {' '}a policy number missing from the policy history response. Refresh after deploying the backend history fix.
-            If this persists, verify policy ownership and the purchase link.
-          </span>
-          <Button size="sm" onClick={refreshAll} disabled={refreshing}>
-            <RefreshCw size={15} /> Refresh
-          </Button>
-        </div>
-      )}
+      {/* UNLINKED PURCHASE NOTICE */}
+
+      {!query.isLoading &&
+        !query.isError &&
+        unlinkedPaidPurchases.length > 0 && (
+          <div className="alert info ix-policy-alert" role="status">
+            <Clock3 size={17} />
+            <span>
+              {unlinkedPaidPurchases.length} paid{' '}
+              {unlinkedPaidPurchases.length === 1
+                ? 'purchase has'
+                : 'purchases have'}{' '}
+              a policy number missing from the policy history response.
+              Refresh after deploying the backend history fix.
+            </span>
+            <Button
+              size="sm"
+              onClick={refreshAll}
+              disabled={refreshing}
+            >
+              <RefreshCw size={15} />
+              Refresh
+            </Button>
+          </div>
+        )}
 
       {/* REFUND NOTICE */}
 
       {summary.refunds > 0 && (
-        <div
-          className="alert info ix-policy-alert"
-          role="status"
-        >
+        <div className="alert info ix-policy-alert" role="status">
           <Clock3 size={17} />
           <span>
             {summary.refunds} policy
-            {summary.refunds === 1 ? ' has' : ' policies have'}
-            {' '}a refund awaiting processing or verification.
-            Refund information refreshes automatically.
+            {summary.refunds === 1 ? ' has' : ' policies have'} a refund
+            awaiting processing or verification. Refund information
+            refreshes automatically.
           </span>
         </div>
       )}
 
       {refreshError && (
-        <div
-          className="alert error ix-policy-alert"
-          role="alert"
-        >
+        <div className="alert error ix-policy-alert" role="alert">
           <AlertCircle size={17} />
           <span>{refreshError}</span>
         </div>
       )}
 
-      {/* POLICY TABLE */}
+      {/* POLICIES */}
 
       <Panel flush>
         <div className="toolbar ix-policy-toolbar">
           <SearchBox
             value={search}
             onChange={setSearch}
-            placeholder="Search by policy number or type"
+            placeholder="Search policy, plan or vehicle number"
           />
 
-          {!claimedSection && (
-            <Segmented
-              value={status}
-              onChange={changeStatus}
-              options={FILTER_OPTIONS}
-            />
-          )}
-
-          <Button
-            onClick={refreshAll}
-            disabled={refreshing}
-          >
+          <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw size={15} />
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
 
+        {/* CATEGORY FILTER */}
+
+        <div className="ix-policy-filter-section">
+          <div className="ix-policy-filter-label">
+            Insurance category
+          </div>
+
+          <Segmented
+            value={category}
+            onChange={changeCategory}
+            options={CATEGORY_OPTIONS}
+          />
+        </div>
+
+        {/* STATUS FILTER */}
+
+        {!claimedSection && (
+          <div className="ix-policy-filter-section">
+            <div className="ix-policy-filter-label">
+              Policy status
+            </div>
+
+            <Segmented
+              value={status}
+              onChange={changeStatus}
+              options={FILTER_OPTIONS}
+            />
+          </div>
+        )}
+
         <DataState
           query={query}
           empty={{
             title: 'No policies yet',
-            text:
-              'Once you buy an insurance plan, it will appear here.',
+            text: 'Once you buy an insurance plan, it will appear here.',
           }}
           emptyAction={
-            <Link
-              className="btn primary"
-              to="/app/plans"
-            >
+            <Link className="btn primary" to="/app/plans">
               Browse plans
             </Link>
           }
@@ -1266,53 +1369,160 @@ export default function MyPolicies() {
           {() =>
             rows.length === 0 ? (
               <div className="empty">
-                <h4>{claimedSection ? 'No claimed policies found' : 'No matching policies'}</h4>
-                <p>{claimedSection
-                  ? 'Policies with claims will appear here. Try clearing your search.'
-                  : 'Try another search or status filter.'}</p>
+                <h4>
+                  {claimedSection
+                    ? 'No claimed policies found'
+                    : 'No matching policies'}
+                </h4>
+
+                <p>
+                  {claimedSection
+                    ? 'Policies with claims will appear here. Try clearing your search.'
+                    : 'Try another category, search or status filter.'}
+                </p>
               </div>
             ) : claimedSection ? (
-              <div className="ix-claimed-list" aria-label="Claimed policy history">
+              <div
+                className="ix-claimed-list"
+                aria-label="Claimed policy history"
+              >
                 {rows.map((policy) => (
-                  <article className="ix-claimed-card" key={String(policy.policyNumber)}>
+                  <article
+                    className="ix-claimed-card"
+                    key={String(policy.policyNumber)}
+                  >
                     <div className="ix-claimed-top">
                       <div>
                         <div className="muted">Insurance policy</div>
                         <strong>#{policy.policyNumber}</strong>
                       </div>
+
                       <PolicyStatusBadge policy={policy} />
                     </div>
+
                     <div className="ix-claimed-meta">
-                      <div><small>Cover type</small><b>{policy.coveredTypes || '—'}</b></div>
-                      <div><small>Claims recorded</small><b>{policy.claimCount || (policy.hasClaimHistory ? 'Recorded' : '0')}</b></div>
-                      <div><small>Started</small><b>{date(policy.startDate)}</b></div>
-                      <div><small>Expires</small><b>{date(policy.expiryDate)}</b></div>
+                      <div>
+                        <small>Plan category</small>
+                        <b>{policy.categoryLabel}</b>
+                      </div>
+
+                      <div>
+                        <small>Claims recorded</small>
+                        <b>
+                          {policy.claimCount ||
+                            (policy.hasClaimHistory ? 'Recorded' : '0')}
+                        </b>
+                      </div>
+
+                      <div>
+                        <small>Started</small>
+                        <b>{date(policy.startDate)}</b>
+                      </div>
+
+                      <div>
+                        <small>Expires</small>
+                        <b>{date(policy.expiryDate)}</b>
+                      </div>
                     </div>
+
                     <div className="ix-claimed-footer">
-                      <span className="muted">{policy.alreadyRenewed ? 'Renewal completed' : 'Claim history available'}</span>
-                      <Link className="btn primary ix-policy-action-btn" to="/app/claims">View claims</Link>
+                      <span className="muted">
+                        {policy.alreadyRenewed
+                          ? 'Renewal completed'
+                          : 'Claim history available'}
+                      </span>
+
+                      <Link
+                        className="btn primary ix-policy-action-btn"
+                        to="/app/claims"
+                      >
+                        View claims
+                      </Link>
                     </div>
                   </article>
                 ))}
               </div>
             ) : (
-              <div className="ix-policy-card-grid" aria-label="My policies">
+              <div
+                className="ix-policy-card-grid"
+                aria-label="My policies"
+              >
                 {rows.map((policy) => (
-                  <article className="ix-policy-card" key={String(policy.policyNumber)}>
+                  <article
+                    className="ix-policy-card"
+                    key={String(policy.policyNumber)}
+                  >
                     <div className="ix-policy-card-head">
                       <div className="ix-policy-card-identity">
-                        <span className="ix-policy-eyebrow">Insurance policy</span>
+                        <span className="ix-policy-eyebrow">
+                          {policy.categoryLabel}
+                        </span>
+
                         <h3>#{policy.policyNumber}</h3>
-                        <span className="ix-policy-cover">{policy.coveredTypes || 'Insurance cover'}</span>
+
+                        <span className="ix-policy-cover">
+                          {policy.coveredTypes || 'Insurance cover'}
+                        </span>
                       </div>
+
                       <PolicyStatusBadge policy={policy} />
                     </div>
-                    <div className="ix-policy-card-details">
-                      <div><span>Start date</span><strong>{date(policy.startDate)}</strong></div>
-                      <div><span>Expiry date</span><strong>{date(policy.expiryDate)}</strong></div>
-                      <div><span>Policy term</span><strong>{policy.durationYears != null ? `${policy.durationYears} yr` : '—'}</strong></div>
-                      <div><span>Claims recorded</span><strong>{policy.claimCount || (policy.hasClaimHistory ? 'Recorded' : '0')}</strong></div>
+
+                    {/* CATEGORY ICON AND VEHICLE DETAILS */}
+
+                    <div className="ix-policy-category-line">
+                      <CategoryIcon category={policy.planCategory} />
+
+                      <span>{policy.categoryLabel}</span>
                     </div>
+
+                    {policy.planCategory === 'vehicle' && (
+                      <div className="ix-policy-vehicle-details">
+                        <div>
+                          <span>Registration number</span>
+                          <strong>
+                            {policy.vehicleRegistration || 'Not provided'}
+                          </strong>
+                        </div>
+
+                        <div>
+                          <span>Vehicle model</span>
+                          <strong>
+                            {policy.vehicleModel || 'Not provided'}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="ix-policy-card-details">
+                      <div>
+                        <span>Start date</span>
+                        <strong>{date(policy.startDate)}</strong>
+                      </div>
+
+                      <div>
+                        <span>Expiry date</span>
+                        <strong>{date(policy.expiryDate)}</strong>
+                      </div>
+
+                      <div>
+                        <span>Policy term</span>
+                        <strong>
+                          {policy.durationYears != null
+                            ? `${policy.durationYears} yr`
+                            : '—'}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Claims recorded</span>
+                        <strong>
+                          {policy.claimCount ||
+                            (policy.hasClaimHistory ? 'Recorded' : '0')}
+                        </strong>
+                      </div>
+                    </div>
+
                     <div className="ix-policy-card-footer">
                       <span className="ix-policy-card-hint">
                         {policy.alreadyRenewed
@@ -1321,11 +1531,15 @@ export default function MyPolicies() {
                             ? 'Refund pending or processing'
                             : policy.pendingClaim
                               ? 'Claim under review'
-                              : policy.displayStatus === 'ACTIVE'
+                              : policy.coverageActive
                                 ? 'Coverage currently active'
                                 : 'Policy details'}
                       </span>
-                      <PolicyAction policy={policy} onClaim={setClaimFor} />
+
+                      <PolicyAction
+                        policy={policy}
+                        onClaim={setClaimFor}
+                      />
                     </div>
                   </article>
                 ))}
