@@ -8,8 +8,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,11 +63,82 @@ public class PolicyPurchaseService {
             new BigDecimal("0.18");
 
     private static final BigDecimal ZERO =
-            BigDecimal.ZERO.setScale(
-                    2,
-                    RoundingMode.HALF_UP);
+            BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
     private static final long REFUND_WINDOW_HOURS = 24;
+
+    private static final int MAX_APPLICATION_FIELD_LENGTH = 2000;
+
+    private static final Set<String> HEALTH_PLANS = Set.of(
+            "HLT-BASIC",
+            "HLT-FAMILY",
+            "HLT-PREMIUM"
+    );
+
+    private static final Set<String> LIFE_PLANS = Set.of(
+            "LIF-ESSENTIAL",
+            "LIF-FAMILY",
+            "LIF-PREMIUM"
+    );
+
+    private static final Set<String> MOTOR_PLANS = Set.of(
+            "MTR-BIKE",
+            "MTR-CAR",
+            "MTR-COMP"
+    );
+
+    private static final Set<String> FAMILY_PLANS = Set.of(
+            "HLT-FAMILY",
+            "LIF-FAMILY"
+    );
+
+    private static final Set<String> ALLOWED_GENDERS = Set.of(
+            "Male",
+            "Female",
+            "Other"
+    );
+
+    private static final Set<String> ALLOWED_RELATIONS = Set.of(
+            "Spouse",
+            "Son",
+            "Daughter",
+            "Father",
+            "Mother",
+            "Brother",
+            "Sister",
+            "Other"
+    );
+
+    private static final Set<String> ALLOWED_OCCUPATIONS = Set.of(
+            "Salaried",
+            "Self-employed",
+            "Business",
+            "Government employee",
+            "Professional",
+            "Student",
+            "Homemaker",
+            "Retired",
+            "Other"
+    );
+
+    private static final Set<String> ALLOWED_YES_NO = Set.of(
+            "Yes",
+            "No"
+    );
+
+    private static final Set<String> ALLOWED_FUEL_TYPES = Set.of(
+            "Petrol",
+            "Diesel",
+            "Electric",
+            "CNG",
+            "Hybrid",
+            "Other"
+    );
+
+    private static final Set<String> ALLOWED_VEHICLE_USAGES = Set.of(
+            "Personal",
+            "Commercial"
+    );
 
     private final ClaimsDao claimsDao;
     private final RefundAttemptRepository refundAttemptRepository;
@@ -130,14 +203,9 @@ public class PolicyPurchaseService {
 
         validatePurchaseRequest(purchaseDto);
 
-        String orderId =
-                purchaseDto.getRazorpayOrderId().trim();
-
-        String paymentId =
-                purchaseDto.getRazorpayPaymentId().trim();
-
-        String signature =
-                purchaseDto.getRazorpaySignature().trim();
+        String orderId = purchaseDto.getRazorpayOrderId().trim();
+        String paymentId = purchaseDto.getRazorpayPaymentId().trim();
+        String signature = purchaseDto.getRazorpaySignature().trim();
 
         // =====================================================
         // PAYMENT ATTEMPT
@@ -220,8 +288,7 @@ public class PolicyPurchaseService {
         }
 
         if (attempt.getRazorpayPaymentId() != null
-                && !paymentId.equals(
-                        attempt.getRazorpayPaymentId())) {
+                && !paymentId.equals(attempt.getRazorpayPaymentId())) {
 
             throw new IllegalStateException(
                     "Payment ID conflicts with the recorded attempt.");
@@ -248,6 +315,13 @@ public class PolicyPurchaseService {
             throw new IllegalStateException(
                     "Insurance plan is inactive.");
         }
+
+        // =====================================================
+        // VALIDATE PLAN-SPECIFIC APPLICATION
+        // This is enforced by the backend, not just the UI.
+        // =====================================================
+
+        validatePlanApplication(plan, purchaseDto);
 
         // =====================================================
         // CALCULATE PREMIUM
@@ -335,26 +409,13 @@ public class PolicyPurchaseService {
         // COVERAGE AND PREMIUM
         // =====================================================
 
-        purchase.setCoverageAmount(
-                attempt.getCoverageAmount());
-
-        purchase.setBasePremium(
-                premium.basePremium);
-
-        purchase.setDiscountAmount(
-                premium.discountAmount);
-
-        purchase.setTaxableAmount(
-                premium.taxableAmount);
-
-        purchase.setGstRate(
-                premium.gstRate);
-
-        purchase.setGstAmount(
-                premium.gstAmount);
-
-        purchase.setTotalPremium(
-                premium.totalPremium);
+        purchase.setCoverageAmount(attempt.getCoverageAmount());
+        purchase.setBasePremium(premium.basePremium);
+        purchase.setDiscountAmount(premium.discountAmount);
+        purchase.setTaxableAmount(premium.taxableAmount);
+        purchase.setGstRate(premium.gstRate);
+        purchase.setGstAmount(premium.gstAmount);
+        purchase.setTotalPremium(premium.totalPremium);
 
         // =====================================================
         // NOMINEE
@@ -468,6 +529,815 @@ public class PolicyPurchaseService {
     }
 
     // =========================================================
+    // PLAN-SPECIFIC APPLICATION VALIDATION
+    // =========================================================
+
+    private void validatePlanApplication(
+            InsurancePlan plan,
+            PurchasePolicyDto dto) {
+
+        String planCode = normalizePlanCode(plan.getPlanCode());
+
+        if (planCode == null) {
+            throw new IllegalStateException(
+                    "The selected insurance plan has no plan code.");
+        }
+
+        boolean health = HEALTH_PLANS.contains(planCode);
+        boolean life = LIFE_PLANS.contains(planCode);
+        boolean motor = MOTOR_PLANS.contains(planCode);
+        boolean family = FAMILY_PLANS.contains(planCode);
+
+        if (!health && !life && !motor) {
+            throw new IllegalArgumentException(
+                    "Application validation is not configured for plan: "
+                    + planCode);
+        }
+
+        Map<String, Object> details = dto.getApplicationDetails();
+
+        if (details == null || details.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Application details are required for this insurance plan.");
+        }
+
+        // The plan code and category sent by the UI are informational.
+        // They must never override the plan loaded from the database.
+
+        Object submittedCode = details.get("planCode");
+
+        if (submittedCode != null
+                && !planCode.equalsIgnoreCase(
+                        String.valueOf(submittedCode).trim())) {
+
+            throw new IllegalArgumentException(
+                    "Application plan code does not match the selected plan.");
+        }
+
+        String expectedCategory =
+                health ? "HEALTH" : life ? "LIFE" : "MOTOR";
+
+        Object submittedCategory = details.get("planCategory");
+
+        if (submittedCategory != null
+                && !expectedCategory.equalsIgnoreCase(
+                        String.valueOf(submittedCategory).trim())) {
+
+            throw new IllegalArgumentException(
+                    "Application category does not match the selected plan.");
+        }
+
+        if (health || life) {
+            validatePersonDetails(details, life);
+        }
+
+        if (health) {
+            validateHealthDetails(details);
+        }
+
+        if (life) {
+            validateLifeDetails(details);
+        }
+
+        if (motor) {
+            validateMotorDetails(details);
+        }
+
+        // Only family plans can have family member records.
+        validateFamilyPlanMembers(
+                planCode,
+                dto.getFamilyMembers());
+
+        // Validate and normalize all submitted values before JSON storage.
+        dto.setApplicationDetails(
+                sanitizeApplicationDetails(details));
+    }
+
+    // =========================================================
+    // COMMON PERSON DETAILS
+    // =========================================================
+
+    private void validatePersonDetails(
+            Map<String, Object> details,
+            boolean life) {
+
+        String name = requiredText(
+                details,
+                "applicantName",
+                "Applicant full name is required.",
+                100);
+
+        String dateOfBirth = requiredText(
+                details,
+                "dateOfBirth",
+                "Applicant date of birth is required.",
+                10);
+
+        String gender = requiredText(
+                details,
+                "gender",
+                "Applicant gender is required.",
+                30);
+
+        String occupation = requiredText(
+                details,
+                "occupation",
+                "Applicant occupation is required.",
+                100);
+
+        LocalDate dob = parseDate(
+                dateOfBirth,
+                "Applicant date of birth");
+
+        if (dob.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException(
+                    "Applicant date of birth cannot be in the future.");
+        }
+
+        if (!ALLOWED_GENDERS.contains(gender)) {
+            throw new IllegalArgumentException(
+                    "Select a valid applicant gender.");
+        }
+
+        if (!ALLOWED_OCCUPATIONS.contains(occupation)) {
+            throw new IllegalArgumentException(
+                    "Select a valid applicant occupation.");
+        }
+
+        if (name.length() < 2) {
+            throw new IllegalArgumentException(
+                    "Applicant name must contain at least 2 characters.");
+        }
+
+        // Normalize the accepted text values.
+        details.put("applicantName", name);
+        details.put("dateOfBirth", dob.toString());
+        details.put("gender", gender);
+        details.put("occupation", occupation);
+    }
+
+    // =========================================================
+    // HEALTH APPLICATION VALIDATION
+    // =========================================================
+
+    private void validateHealthDetails(
+            Map<String, Object> details) {
+
+        String diseaseAnswer = requiredText(
+                details,
+                "hasPreExistingDisease",
+                "Please declare whether you have a pre-existing disease.",
+                10);
+
+        if (!ALLOWED_YES_NO.contains(diseaseAnswer)) {
+            throw new IllegalArgumentException(
+                    "Invalid pre-existing disease response.");
+        }
+
+        String medicalHistory = requiredText(
+                details,
+                "medicalHistory",
+                "Medical history is required. Enter None if not applicable.",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        String medicationAnswer = requiredText(
+                details,
+                "takingMedication",
+                "Please declare whether you are currently taking medication.",
+                10);
+
+        if (!ALLOWED_YES_NO.contains(medicationAnswer)) {
+            throw new IllegalArgumentException(
+                    "Invalid medication response.");
+        }
+
+        String diseases = optionalText(
+                details,
+                "preExistingDiseases",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        String medicationDetails = optionalText(
+                details,
+                "medicationDetails",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        if ("Yes".equals(diseaseAnswer) && diseases == null) {
+            throw new IllegalArgumentException(
+                    "Details of pre-existing diseases are required.");
+        }
+
+        if ("Yes".equals(medicationAnswer)
+                && medicationDetails == null) {
+
+            throw new IllegalArgumentException(
+                    "Current medication details are required.");
+        }
+
+        if ("No".equals(diseaseAnswer) && diseases != null) {
+            throw new IllegalArgumentException(
+                    "Pre-existing disease details must be empty when the answer is No.");
+        }
+
+        if ("No".equals(medicationAnswer)
+                && medicationDetails != null) {
+
+            throw new IllegalArgumentException(
+                    "Medication details must be empty when the answer is No.");
+        }
+
+        details.put("hasPreExistingDisease", diseaseAnswer);
+        details.put("medicalHistory", medicalHistory);
+        details.put("takingMedication", medicationAnswer);
+
+        if (diseases != null) {
+            details.put("preExistingDiseases", diseases);
+        } else {
+            details.remove("preExistingDiseases");
+        }
+
+        if (medicationDetails != null) {
+            details.put("medicationDetails", medicationDetails);
+        } else {
+            details.remove("medicationDetails");
+        }
+
+        validateOptionalDecimal(
+                details,
+                "heightCm",
+                new BigDecimal("30"),
+                new BigDecimal("250"));
+
+        validateOptionalDecimal(
+                details,
+                "weightKg",
+                new BigDecimal("2"),
+                new BigDecimal("400"));
+    }
+
+    // =========================================================
+    // LIFE APPLICATION VALIDATION
+    // =========================================================
+
+    private void validateLifeDetails(
+            Map<String, Object> details) {
+
+        BigDecimal annualIncome = requiredDecimal(
+                details,
+                "annualIncome",
+                "Annual income is required.");
+
+        if (annualIncome.compareTo(BigDecimal.ZERO) <= 0
+                || annualIncome.compareTo(
+                        new BigDecimal("1000000000000")) > 0) {
+
+            throw new IllegalArgumentException(
+                    "Enter a valid annual income.");
+        }
+
+        String smokingStatus = requiredText(
+                details,
+                "smokingStatus",
+                "Smoking status is required.",
+                50);
+
+        if (!Set.of(
+                "Never smoked",
+                "Former smoker",
+                "Currently smoking"
+        ).contains(smokingStatus)) {
+
+            throw new IllegalArgumentException(
+                    "Select a valid smoking status.");
+        }
+
+        String alcohol = requiredText(
+                details,
+                "alcoholConsumption",
+                "Alcohol consumption status is required.",
+                50);
+
+        if (!Set.of(
+                "Never",
+                "Occasionally",
+                "Regularly"
+        ).contains(alcohol)) {
+
+            throw new IllegalArgumentException(
+                    "Select a valid alcohol consumption status.");
+        }
+
+        String hazardousActivities = requiredText(
+                details,
+                "hazardousActivities",
+                "Please declare whether you participate in hazardous activities.",
+                10);
+
+        if (!ALLOWED_YES_NO.contains(hazardousActivities)) {
+            throw new IllegalArgumentException(
+                    "Invalid hazardous activities response.");
+        }
+
+        String medicalConditions = requiredText(
+                details,
+                "existingMedicalConditions",
+                "Enter existing medical conditions or None.",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        String familyHistory = requiredText(
+                details,
+                "familyMedicalHistory",
+                "Enter family medical history or None.",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        details.put("annualIncome", annualIncome.toPlainString());
+        details.put("smokingStatus", smokingStatus);
+        details.put("alcoholConsumption", alcohol);
+        details.put("hazardousActivities", hazardousActivities);
+        details.put("existingMedicalConditions", medicalConditions);
+        details.put("familyMedicalHistory", familyHistory);
+    }
+
+    // =========================================================
+    // MOTOR APPLICATION VALIDATION
+    // =========================================================
+
+    private void validateMotorDetails(
+            Map<String, Object> details) {
+
+        String registration = requiredText(
+                details,
+                "registrationNumber",
+                "Vehicle registration number is required.",
+                30);
+
+        String make = requiredText(
+                details,
+                "vehicleMake",
+                "Vehicle make is required.",
+                100);
+
+        String model = requiredText(
+                details,
+                "vehicleModel",
+                "Vehicle model is required.",
+                100);
+
+        String yearValue = requiredText(
+                details,
+                "manufacturingYear",
+                "Vehicle manufacturing year is required.",
+                4);
+
+        String fuel = requiredText(
+                details,
+                "fuelType",
+                "Vehicle fuel type is required.",
+                30);
+
+        String usage = requiredText(
+                details,
+                "vehicleUsage",
+                "Vehicle usage is required.",
+                30);
+
+        int year;
+
+        try {
+            year = Integer.parseInt(yearValue);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    "Enter a valid vehicle manufacturing year.");
+        }
+
+        int currentYear = LocalDate.now().getYear();
+
+        if (year < 1900 || year > currentYear) {
+            throw new IllegalArgumentException(
+                    "Vehicle manufacturing year is invalid.");
+        }
+
+        if (!ALLOWED_FUEL_TYPES.contains(fuel)) {
+            throw new IllegalArgumentException(
+                    "Select a valid vehicle fuel type.");
+        }
+
+        if (!ALLOWED_VEHICLE_USAGES.contains(usage)) {
+            throw new IllegalArgumentException(
+                    "Select a valid vehicle usage.");
+        }
+
+        String previousInsurance = requiredText(
+                details,
+                "previousInsurance",
+                "Previous insurance declaration is required.",
+                10);
+
+        if (!ALLOWED_YES_NO.contains(previousInsurance)) {
+            throw new IllegalArgumentException(
+                    "Invalid previous insurance response.");
+        }
+
+        String previousInsurer = optionalText(
+                details,
+                "previousInsurer",
+                150);
+
+        String previousPolicyNumber = optionalText(
+                details,
+                "previousPolicyNumber",
+                100);
+
+        String previousExpiry = optionalText(
+                details,
+                "previousPolicyExpiryDate",
+                10);
+
+        if ("Yes".equals(previousInsurance)
+                && previousInsurer == null) {
+
+            throw new IllegalArgumentException(
+                    "Previous insurance company is required.");
+        }
+
+        if ("No".equals(previousInsurance)
+                && (
+                    previousInsurer != null ||
+                    previousPolicyNumber != null ||
+                    previousExpiry != null
+                )) {
+
+            throw new IllegalArgumentException(
+                    "Previous insurance details must be empty when the answer is No.");
+        }
+
+        if (previousExpiry != null) {
+            LocalDate expiry = parseDate(
+                    previousExpiry,
+                    "Previous policy expiry date");
+
+            details.put(
+                    "previousPolicyExpiryDate",
+                    expiry.toString());
+        }
+
+        String previousClaims = requiredText(
+                details,
+                "previousClaims",
+                "Previous claims declaration is required.",
+                10);
+
+        if (!ALLOWED_YES_NO.contains(previousClaims)) {
+            throw new IllegalArgumentException(
+                    "Invalid previous claims response.");
+        }
+
+        String claimDetails = optionalText(
+                details,
+                "claimDetails",
+                MAX_APPLICATION_FIELD_LENGTH);
+
+        if ("Yes".equals(previousClaims) && claimDetails == null) {
+            throw new IllegalArgumentException(
+                    "Previous claim details are required.");
+        }
+
+        if ("No".equals(previousClaims) && claimDetails != null) {
+            throw new IllegalArgumentException(
+                    "Previous claim details must be empty when the answer is No.");
+        }
+
+        details.put("registrationNumber", registration.toUpperCase(Locale.ROOT));
+        details.put("vehicleMake", make);
+        details.put("vehicleModel", model);
+        details.put("manufacturingYear", String.valueOf(year));
+        details.put("fuelType", fuel);
+        details.put("vehicleUsage", usage);
+        details.put("previousInsurance", previousInsurance);
+        details.put("previousClaims", previousClaims);
+
+        String variant = optionalText(
+                details,
+                "vehicleVariant",
+                100);
+
+        if (variant != null) {
+            details.put("vehicleVariant", variant);
+        } else {
+            details.remove("vehicleVariant");
+        }
+
+        if (previousInsurer != null) {
+            details.put("previousInsurer", previousInsurer);
+        } else {
+            details.remove("previousInsurer");
+        }
+
+        if (previousPolicyNumber != null) {
+            details.put("previousPolicyNumber", previousPolicyNumber);
+        } else {
+            details.remove("previousPolicyNumber");
+        }
+
+        if (claimDetails != null) {
+            details.put("claimDetails", claimDetails);
+        } else {
+            details.remove("claimDetails");
+        }
+    }
+
+    // =========================================================
+    // FAMILY PLAN VALIDATION
+    // =========================================================
+
+    private void validateFamilyPlanMembers(
+            String planCode,
+            List<PurchasePolicyDto.FamilyMemberDto> members) {
+
+        boolean familyPlan = FAMILY_PLANS.contains(planCode);
+
+        if (!familyPlan) {
+
+            if (members != null && !members.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Family members can only be submitted for a family insurance plan.");
+            }
+
+            return;
+        }
+
+        if (members == null || members.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Add at least one family member for this family plan.");
+        }
+
+        if (members.size() > 20) {
+            throw new IllegalArgumentException(
+                    "A maximum of 20 family members can be added.");
+        }
+
+        for (int index = 0; index < members.size(); index++) {
+
+            PurchasePolicyDto.FamilyMemberDto member =
+                    members.get(index);
+
+            if (member == null) {
+                throw new IllegalArgumentException(
+                        "Family member " + (index + 1)
+                        + " contains invalid details.");
+            }
+
+            String name = requiredMemberText(
+                    member.getName(),
+                    "Family member " + (index + 1) + " name",
+                    100);
+
+            String relation = requiredMemberText(
+                    member.getRelation(),
+                    "Family member " + (index + 1) + " relationship",
+                    50);
+
+            String gender = requiredMemberText(
+                    member.getGender(),
+                    "Family member " + (index + 1) + " gender",
+                    30);
+
+            String occupation = requiredMemberText(
+                    member.getOccupation(),
+                    "Family member " + (index + 1) + " occupation",
+                    100);
+
+            if (member.getDateOfBirth() == null) {
+                throw new IllegalArgumentException(
+                        "Date of birth is required for family member "
+                        + (index + 1) + ".");
+            }
+
+            if (member.getDateOfBirth().isAfter(LocalDate.now())) {
+                throw new IllegalArgumentException(
+                        "Family member date of birth cannot be in the future.");
+            }
+
+            if (!ALLOWED_RELATIONS.contains(relation)) {
+                throw new IllegalArgumentException(
+                        "Select a valid relationship for family member "
+                        + (index + 1) + ".");
+            }
+
+            if (!ALLOWED_GENDERS.contains(gender)) {
+                throw new IllegalArgumentException(
+                        "Select a valid gender for family member "
+                        + (index + 1) + ".");
+            }
+
+            if (!ALLOWED_OCCUPATIONS.contains(occupation)) {
+                throw new IllegalArgumentException(
+                        "Select a valid occupation for family member "
+                        + (index + 1) + ".");
+            }
+
+            member.setName(name);
+            member.setRelation(relation);
+            member.setGender(gender);
+            member.setOccupation(occupation);
+        }
+    }
+
+    // =========================================================
+    // APPLICATION DETAILS SANITIZATION
+    // =========================================================
+
+    private Map<String, Object> sanitizeApplicationDetails(
+            Map<String, Object> details) {
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Object> entry : details.entrySet()) {
+
+            String key = entry.getKey();
+
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+
+            Object value = entry.getValue();
+
+            if (value == null) {
+                continue;
+            }
+
+            if (value instanceof String text) {
+
+                String trimmed = text.trim();
+
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+
+                if (trimmed.length() > MAX_APPLICATION_FIELD_LENGTH) {
+                    throw new IllegalArgumentException(
+                            "Application field exceeds the allowed length: "
+                            + key);
+                }
+
+                result.put(key, trimmed);
+
+            } else if (
+                    value instanceof Number ||
+                    value instanceof Boolean
+            ) {
+
+                result.put(key, value);
+
+            } else {
+                throw new IllegalArgumentException(
+                        "Unsupported value in application field: " + key);
+            }
+        }
+
+        return result;
+    }
+
+    // =========================================================
+    // APPLICATION FIELD HELPERS
+    // =========================================================
+
+    private String requiredText(
+            Map<String, Object> details,
+            String key,
+            String message,
+            int maxLength) {
+
+        String value = optionalText(details, key, maxLength);
+
+        if (value == null) {
+            throw new IllegalArgumentException(message);
+        }
+
+        return value;
+    }
+
+    private String optionalText(
+            Map<String, Object> details,
+            String key,
+            int maxLength) {
+
+        Object raw = details.get(key);
+
+        if (raw == null) {
+            return null;
+        }
+
+        if (!(raw instanceof String)) {
+            throw new IllegalArgumentException(
+                    "Invalid value for application field: " + key);
+        }
+
+        String value = ((String) raw).trim();
+
+        if (value.isEmpty()) {
+            return null;
+        }
+
+        if (value.length() > maxLength) {
+            throw new IllegalArgumentException(
+                    "Application field exceeds the allowed length: " + key);
+        }
+
+        return value;
+    }
+
+    private BigDecimal requiredDecimal(
+            Map<String, Object> details,
+            String key,
+            String message) {
+
+        String value = requiredText(
+                details,
+                key,
+                message,
+                30);
+
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    "Enter a valid numeric value for " + key + ".");
+        }
+    }
+
+    private void validateOptionalDecimal(
+            Map<String, Object> details,
+            String key,
+            BigDecimal minimum,
+            BigDecimal maximum) {
+
+        String value = optionalText(details, key, 30);
+
+        if (value == null) {
+            details.remove(key);
+            return;
+        }
+
+        BigDecimal number;
+
+        try {
+            number = new BigDecimal(value);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    "Enter a valid numeric value for " + key + ".");
+        }
+
+        if (number.compareTo(minimum) < 0
+                || number.compareTo(maximum) > 0) {
+
+            throw new IllegalArgumentException(
+                    "Enter a valid value for " + key + ".");
+        }
+
+        details.put(key, number.stripTrailingZeros().toPlainString());
+    }
+
+    private LocalDate parseDate(
+            String value,
+            String fieldName) {
+
+        try {
+            return LocalDate.parse(value);
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException(
+                    fieldName + " must be a valid date in YYYY-MM-DD format.");
+        }
+    }
+
+    private String requiredMemberText(
+            String value,
+            String fieldName,
+            int maxLength) {
+
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    fieldName + " is required.");
+        }
+
+        String result = value.trim();
+
+        if (result.length() > maxLength) {
+            throw new IllegalArgumentException(
+                    fieldName + " exceeds the allowed length.");
+        }
+
+        return result;
+    }
+
+    private String normalizePlanCode(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        return value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    // =========================================================
     // ADMIN - ALL PURCHASES
     // =========================================================
 
@@ -551,11 +1421,24 @@ public class PolicyPurchaseService {
                     + "and signature are required.");
         }
 
+        if (isBlank(dto.getNomineeName())
+                || isBlank(dto.getNomineeRelation())
+                || isBlank(dto.getNomineeContact())) {
+
+            throw new IllegalArgumentException(
+                    "Nominee name, relationship and contact are required.");
+        }
+
+        if (!dto.getNomineeContact().trim().matches("^[6-9]\\d{9}$")) {
+            throw new IllegalArgumentException(
+                    "Enter a valid 10-digit nominee mobile number.");
+        }
+
         validateFamilyMembers(dto.getFamilyMembers());
     }
 
     // =========================================================
-    // FAMILY MEMBER VALIDATION
+    // GENERAL FAMILY MEMBER VALIDATION
     // =========================================================
 
     private void validateFamilyMembers(
@@ -628,17 +1511,13 @@ public class PolicyPurchaseService {
                     "Purchase belongs to another customer.");
         }
 
-        if (!paymentId.equals(
-                purchase.getRazorpayPaymentId())) {
-
+        if (!paymentId.equals(purchase.getRazorpayPaymentId())) {
             throw new IllegalStateException(
                     "Payment reference does not match "
                     + "the existing purchase.");
         }
 
-        if (!"PAID".equalsIgnoreCase(
-                purchase.getPaymentStatus())) {
-
+        if (!"PAID".equalsIgnoreCase(purchase.getPaymentStatus())) {
             throw new IllegalStateException(
                     "Existing purchase is not marked as paid.");
         }
@@ -696,11 +1575,9 @@ public class PolicyPurchaseService {
                 .multiply(BigDecimal.valueOf(durationYears))
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // Apply the same long-term discount as PaymentService.
         BigDecimal discountAmount = ZERO;
 
         if (durationYears >= 2) {
-
             discountAmount = basePremium
                     .multiply(LONG_TERM_DISCOUNT)
                     .setScale(2, RoundingMode.HALF_UP);
@@ -710,7 +1587,6 @@ public class PolicyPurchaseService {
                 .subtract(discountAmount)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // Apply GST after discount.
         BigDecimal gstRate = getGstRate(plan);
 
         BigDecimal gstAmount = taxableAmount
@@ -747,7 +1623,7 @@ public class PolicyPurchaseService {
 
         String planCode = plan.getPlanCode()
                 .trim()
-                .toUpperCase(java.util.Locale.ROOT);
+                .toUpperCase(Locale.ROOT);
 
         if (planCode.startsWith("HLT-")
                 || planCode.startsWith("LIF-")) {
@@ -816,17 +1692,14 @@ public class PolicyPurchaseService {
         dto.setNomineeRelation(purchase.getNomineeRelation());
         dto.setNomineeContact(purchase.getNomineeContact());
 
-        // Application details.
         dto.setApplicationDetails(
                 copyApplicationDetails(
                         purchase.getApplicationDetails()));
 
-        // Family members.
         dto.setFamilyMembers(
                 toFamilyMemberDtos(
                         purchase.getFamilyMembers()));
 
-        // Payment details.
         dto.setPaymentMethod(purchase.getPaymentMethod());
         dto.setPaymentStatus(purchase.getPaymentStatus());
         dto.setTransactionId(purchase.getTransactionId());
@@ -845,7 +1718,6 @@ public class PolicyPurchaseService {
         dto.setPurchaseDate(purchase.getPurchaseDate());
         dto.setCreatedAt(purchase.getCreatedAt());
 
-        // Refund details.
         dto.setRefundStatus(purchase.getRefundStatus());
         dto.setRefundId(purchase.getRefundId());
         dto.setRefundAmount(purchase.getRefundAmount());
