@@ -204,4 +204,22 @@ public class VehicleVerificationService {
 
         return value.booleanValue();
     }
+
+    
+private void diagnoseApiExpressDns() {
+    try {
+        java.net.InetAddress[] addresses =
+                java.net.InetAddress.getAllByName("api.apiexpress.in");
+
+        for (java.net.InetAddress address : addresses) {
+            log.info("API Express DNS resolved to: {}", address.getHostAddress());
+        }
+
+    } catch (Exception exception) {
+        log.error("API Express DNS resolution failed", exception);
+    }
 }
+
+}
+
+
