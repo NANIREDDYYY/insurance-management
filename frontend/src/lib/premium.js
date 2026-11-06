@@ -6,17 +6,18 @@
  * Adjustable coverage premiums are proportional estimates.
  *
  * Multi-year discount:
- * - 5% discount applies to ALL durations from 1–5 years.
+ * - No discount for 1-year policies.
+ * - 5% discount applies for durations from 2–5 years.
  * - This is an InsureX pricing rule, not a government discount.
  *
  * GST assumptions:
- * - Health: 0% for qualifying exempt policies.
- * - Life: 0% for qualifying exempt policies.
+ * - Health: 0% for qualifying individual/family policies.
+ * - Life: 0% for qualifying individual/family policies.
  * - Motor: 18% estimate.
- * - Accident: 18% estimate.
+ * - Accident: 18% estimate (archived frontend plan only).
  *
- * These are frontend estimates, not authoritative tax calculations.
- * Verify each policy's actual classification before charging customers.
+ * Frontend estimates are not authoritative tax calculations.
+ * The backend remains authoritative for payment amounts.
  */
 
 export const PLANS = [
@@ -172,7 +173,7 @@ export const COVERAGE_STEP = 100000;
 
 export const MAX_YEARS = 5;
 
-// InsureX pricing discount applied to every duration.
+// InsureX discount for policies of 2–5 years.
 export const MULTI_YEAR_DISCOUNT_RATE = 5;
 
 // Estimated category-based GST rates.
@@ -183,7 +184,7 @@ export const GST_RATES = {
   accident: 18,
 };
 
-// Fallback for categories that are not classified.
+// Fallback for unclassified frontend categories.
 export const GST_RATE = 18;
 
 const round2 = (value) =>
@@ -219,10 +220,36 @@ function matchesAlias(type, alias) {
 /**
  * Returns the estimated GST rate for a plan or category.
  *
- * Health/life are treated as exempt only when the actual policy
- * qualifies for the applicable exemption.
+ * For actual InsureX plans, classification follows the same
+ * plan-code prefixes used by the backend:
+ * HLT- = 0%, LIF- = 0%, MTR- = 18%.
+ *
+ * Category-based handling is retained for frontend compatibility.
  */
 export function gstRateForPlan(planOrType) {
+  if (
+    typeof planOrType === 'object' &&
+    planOrType !== null
+  ) {
+    const code = String(
+      planOrType.code ?? planOrType.key ?? '',
+    )
+      .trim()
+      .toUpperCase();
+
+    if (code.startsWith('HLT-')) {
+      return GST_RATES.health;
+    }
+
+    if (code.startsWith('LIF-')) {
+      return GST_RATES.life;
+    }
+
+    if (code.startsWith('MTR-')) {
+      return GST_RATES.motor;
+    }
+  }
+
   const type =
     typeof planOrType === 'object' && planOrType !== null
       ? planOrType.type
@@ -344,7 +371,7 @@ export function plansForType(type) {
  *
  * annualPremium = listed yearly premium × selected coverage / listed coverage
  * base = annualPremium × years
- * discount = 5% of base for every duration from 1 to 5 years
+ * discount = 5% of base only when years >= 2
  * taxable = base - discount
  * GST = taxable × category GST rate
  * total = taxable + GST
@@ -385,8 +412,11 @@ export function estimate(
     annualPremium * selectedYears,
   );
 
-  // Apply the 5% InsureX discount for every selected duration.
-  const discountRate = MULTI_YEAR_DISCOUNT_RATE;
+  // Backend rule: apply 5% discount only for 2–5 years.
+  const discountRate =
+    selectedYears >= 2
+      ? MULTI_YEAR_DISCOUNT_RATE
+      : 0;
 
   const discount = round2(
     (base * discountRate) / 100,
