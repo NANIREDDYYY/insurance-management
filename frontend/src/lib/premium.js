@@ -1,4 +1,3 @@
-
 /**
  * InsureX Premium Calculator
  *
@@ -161,20 +160,20 @@ export const PLANS = [
       'Archived accident insurance plan retained for historical purchases.',
     duration: 1,
   },
-];
+]
 
 export const ACTIVE_PLANS = PLANS.filter(
   (plan) => plan.active === true,
-);
+)
 
-export const COVERAGE_MIN = 100000;
-export const COVERAGE_MAX = 10000000;
-export const COVERAGE_STEP = 100000;
+export const COVERAGE_MIN = 100000
+export const COVERAGE_MAX = 10000000
+export const COVERAGE_STEP = 100000
 
-export const MAX_YEARS = 5;
+export const MAX_YEARS = 5
 
 // InsureX discount for policies of 2–5 years.
-export const MULTI_YEAR_DISCOUNT_RATE = 5;
+export const MULTI_YEAR_DISCOUNT_RATE = 5
 
 // Estimated category-based GST rates.
 export const GST_RATES = {
@@ -182,39 +181,39 @@ export const GST_RATES = {
   life: 0,
   motor: 18,
   accident: 18,
-};
+}
 
 // Fallback for unclassified frontend categories.
-export const GST_RATE = 18;
+export const GST_RATE = 18
 
 const round2 = (value) =>
   Math.round(
     (Number(value) + Number.EPSILON) * 100,
-  ) / 100;
+  ) / 100
 
 const normalize = (value) =>
   String(value ?? '')
     .trim()
     .toLowerCase()
     .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, ' ')
 
 const CATEGORY_ALIASES = {
   health: ['health', 'medical'],
   life: ['life'],
   motor: ['motor', 'vehicle', 'auto'],
   accident: ['accident', 'personal accident'],
-};
+}
 
 function matchesAlias(type, alias) {
-  const normalizedType = normalize(type);
-  const normalizedAlias = normalize(alias);
+  const normalizedType = normalize(type)
+  const normalizedAlias = normalize(alias)
 
   return (
     normalizedType === normalizedAlias ||
     normalizedType === `${normalizedAlias} insurance` ||
     normalizedType.startsWith(`${normalizedAlias} `)
-  );
+  )
 }
 
 /**
@@ -235,34 +234,34 @@ export function gstRateForPlan(planOrType) {
       planOrType.code ?? planOrType.key ?? '',
     )
       .trim()
-      .toUpperCase();
+      .toUpperCase()
 
     if (code.startsWith('HLT-')) {
-      return GST_RATES.health;
+      return GST_RATES.health
     }
 
     if (code.startsWith('LIF-')) {
-      return GST_RATES.life;
+      return GST_RATES.life
     }
 
     if (code.startsWith('MTR-')) {
-      return GST_RATES.motor;
+      return GST_RATES.motor
     }
   }
 
   const type =
     typeof planOrType === 'object' && planOrType !== null
       ? planOrType.type
-      : planOrType;
+      : planOrType
 
-  const normalizedType = normalize(type);
+  const normalizedType = normalize(type)
 
   if (
     CATEGORY_ALIASES.health.some((alias) =>
       matchesAlias(normalizedType, alias),
     )
   ) {
-    return GST_RATES.health;
+    return GST_RATES.health
   }
 
   if (
@@ -270,7 +269,7 @@ export function gstRateForPlan(planOrType) {
       matchesAlias(normalizedType, alias),
     )
   ) {
-    return GST_RATES.life;
+    return GST_RATES.life
   }
 
   if (
@@ -278,7 +277,7 @@ export function gstRateForPlan(planOrType) {
       matchesAlias(normalizedType, alias),
     )
   ) {
-    return GST_RATES.motor;
+    return GST_RATES.motor
   }
 
   if (
@@ -286,10 +285,10 @@ export function gstRateForPlan(planOrType) {
       matchesAlias(normalizedType, alias),
     )
   ) {
-    return GST_RATES.accident;
+    return GST_RATES.accident
   }
 
-  return GST_RATE;
+  return GST_RATE
 }
 
 /**
@@ -298,10 +297,10 @@ export function gstRateForPlan(planOrType) {
  */
 export function planFor(identifier) {
   if (identifier == null || identifier === '') {
-    return ACTIVE_PLANS[0] ?? null;
+    return ACTIVE_PLANS[0] ?? null
   }
 
-  const value = normalize(identifier);
+  const value = normalize(identifier)
 
   const exactMatch = ACTIVE_PLANS.find(
     (plan) =>
@@ -309,10 +308,10 @@ export function planFor(identifier) {
       normalize(plan.code) === value ||
       normalize(plan.label) === value ||
       normalize(plan.name) === value,
-  );
+  )
 
   if (exactMatch) {
-    return exactMatch;
+    return exactMatch
   }
 
   for (const [, categoryAliases] of Object.entries(
@@ -329,23 +328,23 @@ export function planFor(identifier) {
         categoryAliases.some((alias) =>
           matchesAlias(plan.type, alias),
         ),
-      );
+      )
 
       if (matchingPlans.length > 0) {
-        return matchingPlans[0];
+        return matchingPlans[0]
       }
     }
   }
 
-  return null;
+  return null
 }
 
 export function activePlans() {
-  return [...ACTIVE_PLANS];
+  return [...ACTIVE_PLANS]
 }
 
 export function plansForType(type) {
-  const value = normalize(type);
+  const value = normalize(type)
 
   const aliases =
     Object.entries(CATEGORY_ALIASES).find(
@@ -356,13 +355,13 @@ export function plansForType(type) {
             normalize(alias) === value ||
             `${normalize(alias)} insurance` === value,
         ),
-    )?.[1] ?? [value];
+    )?.[1] ?? [value]
 
   return ACTIVE_PLANS.filter((plan) =>
     aliases.some((alias) =>
       matchesAlias(plan.type, alias),
     ),
-  );
+  )
 }
 
 /**
@@ -381,19 +380,19 @@ export function estimate(
   coverage,
   years = 1,
 ) {
-  const plan = planFor(planIdentifier);
-  const selectedCoverage = Number(coverage);
-  const selectedYears = Number(years);
+  const plan = planFor(planIdentifier)
+  const selectedCoverage = Number(coverage)
+  const selectedYears = Number(years)
 
   if (!plan) {
-    return null;
+    return null
   }
 
   if (
     !Number.isFinite(selectedCoverage) ||
     selectedCoverage <= 0
   ) {
-    return null;
+    return null
   }
 
   if (
@@ -401,36 +400,38 @@ export function estimate(
     selectedYears < 1 ||
     selectedYears > MAX_YEARS
   ) {
-    return null;
+    return null
   }
 
-  const annualPremium = round2(
-    (plan.yearly * selectedCoverage) / plan.coverage,
-  );
+  // Keep precision until the full policy-term base is calculated.
+  const unroundedAnnualPremium =
+    (plan.yearly * selectedCoverage) / plan.coverage
+
+  const annualPremium = round2(unroundedAnnualPremium)
 
   const base = round2(
-    annualPremium * selectedYears,
-  );
+    unroundedAnnualPremium * selectedYears,
+  )
 
   // Backend rule: apply 5% discount only for 2–5 years.
   const discountRate =
     selectedYears >= 2
       ? MULTI_YEAR_DISCOUNT_RATE
-      : 0;
+      : 0
 
   const discount = round2(
     (base * discountRate) / 100,
-  );
+  )
 
-  const taxable = round2(base - discount);
-  const gstRate = gstRateForPlan(plan);
+  const taxable = round2(base - discount)
+  const gstRate = gstRateForPlan(plan)
 
   const gst = round2(
     (taxable * gstRate) / 100,
-  );
+  )
 
-  const total = round2(taxable + gst);
-  const perYear = round2(total / selectedYears);
+  const total = round2(taxable + gst)
+  const perYear = round2(total / selectedYears)
 
   return {
     planId: plan.id,
@@ -459,5 +460,5 @@ export function estimate(
     perYear,
 
     isEstimate: true,
-  };
+  }
 }
