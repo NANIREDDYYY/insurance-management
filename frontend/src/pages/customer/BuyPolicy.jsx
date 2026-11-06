@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Link,
@@ -14,6 +13,7 @@ import {
   purchases,
   renewals,
   policies,
+  vehicleVerification,
 } from '../../api/endpoints'
 
 import { errorMessage } from '../../api/client'
@@ -245,6 +245,13 @@ function isActivePlan(plan) {
 
 function normalizedStatus(value) {
   return String(value ?? '').trim().toUpperCase()
+}
+
+function normalizeRegistration(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '')
 }
 
 function extractPolicyNumber(purchase) {
@@ -589,6 +596,13 @@ export default function BuyPolicy() {
     createInitialApplicationDetails,
   )
 
+  const [rcVerification, setRcVerification] = useState({
+    loading: false,
+    verifiedRegistration: '',
+    result: null,
+    error: '',
+  })
+
   const [familyMembers, setFamilyMembers] = useState([])
 
   const [errors, setErrors] = useState({})
@@ -851,6 +865,100 @@ export default function BuyPolicy() {
     })
   }, [isRenewal, originalPurchase])
 
+  /* VEHICLE RC VERIFICATION */
+
+  async function verifyVehicleRegistration() {
+    const registrationNumber = normalizeRegistration(
+      applicationDetails.registrationNumber,
+    )
+
+    if (!/^[A-Z0-9]{6,15}$/.test(registrationNumber)) {
+      setRcVerification({
+        loading: false,
+        verifiedRegistration: '',
+        result: null,
+        error: 'Enter a valid vehicle registration number.',
+      })
+      return
+    }
+
+    setRcVerification({
+      loading: true,
+      verifiedRegistration: '',
+      result: null,
+      error: '',
+    })
+
+    try {
+      const response = await vehicleVerification.verify(
+        registrationNumber,
+      )
+
+      if (
+        !response ||
+        String(response.status ?? '').toLowerCase() !== 'success'
+      ) {
+        throw new Error(
+          response?.message ||
+          'Vehicle verification was unsuccessful.',
+        )
+      }
+
+      const verifiedNumber = normalizeRegistration(
+        response.registrationNumber || registrationNumber,
+      )
+
+      if (verifiedNumber !== registrationNumber) {
+        throw new Error(
+          'The returned registration number does not match your input.',
+        )
+      }
+
+      const vehicleDescription = String(
+        response.vehicle || '',
+      ).trim()
+
+      const returnedFuel = String(
+        response.fuel || '',
+      ).trim()
+
+      const matchingFuel = FUEL_TYPES.find(
+        (fuel) =>
+          fuel.toLowerCase() === returnedFuel.toLowerCase(),
+      )
+
+      setApplicationDetails((current) => ({
+        ...current,
+        registrationNumber: verifiedNumber,
+        vehicleModel: vehicleDescription || current.vehicleModel,
+        fuelType: matchingFuel || current.fuelType,
+      }))
+
+      setRcVerification({
+        loading: false,
+        verifiedRegistration: verifiedNumber,
+        result: response,
+        error: '',
+      })
+
+      setErrors((current) => ({
+        ...current,
+        registrationNumber: '',
+        vehicleVerification: '',
+      }))
+    } catch (verificationError) {
+      setRcVerification({
+        loading: false,
+        verifiedRegistration: '',
+        result: null,
+        error: errorMessage(
+          verificationError,
+          'Unable to verify this vehicle. Please try again.',
+        ),
+      })
+    }
+  }
+
   /* APPLICATION STATE HELPERS */
 
   function updateApplicationField(name, value) {
@@ -862,7 +970,19 @@ export default function BuyPolicy() {
     setErrors((current) => ({
       ...current,
       [name]: '',
+      ...(name === 'registrationNumber'
+        ? { vehicleVerification: '' }
+        : {}),
     }))
+
+    if (name === 'registrationNumber') {
+      setRcVerification({
+        loading: false,
+        verifiedRegistration: '',
+        result: null,
+        error: '',
+      })
+    }
   }
 
   function updateFamilyMember(index, name, value) {
@@ -1029,6 +1149,18 @@ export default function BuyPolicy() {
       if (!details.registrationNumber.trim()) {
         nextErrors.registrationNumber =
           'Enter the vehicle registration number.'
+      }
+
+      const currentRegistration = normalizeRegistration(
+        details.registrationNumber,
+      )
+
+      if (
+        !rcVerification.verifiedRegistration ||
+        rcVerification.verifiedRegistration !== currentRegistration
+      ) {
+        nextErrors.vehicleVerification =
+          'Please verify your vehicle registration number before continuing.'
       }
 
       if (!details.vehicleMake.trim()) {
@@ -1563,6 +1695,196 @@ export default function BuyPolicy() {
   /* APPLICATION FORM RENDERER */
 
   function renderApplicationField(field) {
+    if (field.name === 'registrationNumber') {
+      const isVerified =
+        rcVerification.verifiedRegistration ===
+        normalizeRegistration(applicationDetails.registrationNumber)
+
+      return (
+        <div
+          key={field.name}
+          style={{
+            gridColumn: '1 / -1',
+            minWidth: 0,
+            marginBottom: '15px',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              alignItems: 'end',
+              gap: '10px',
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <ApplicationField
+                {...field}
+                value={applicationDetails[field.name]}
+                onChange={updateApplicationField}
+                error={errors[field.name]}
+                disabled={rcVerification.loading || paying}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={verifyVehicleRegistration}
+              disabled={
+                rcVerification.loading ||
+                paying ||
+                !applicationDetails.registrationNumber.trim()
+              }
+              style={{
+                minHeight: '42px',
+                padding: '10px 16px',
+                border: 'none',
+                borderRadius: '9px',
+                background: isVerified ? '#e5f5eb' : '#176b43',
+                color: isVerified ? '#176b43' : '#fff',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                opacity: rcVerification.loading ? 0.7 : 1,
+              }}
+            >
+              {rcVerification.loading
+                ? 'Verifying...'
+                : isVerified
+                  ? '✓ Verified'
+                  : 'Verify RC'}
+            </button>
+          </div>
+
+          {errors.vehicleVerification && (
+            <span style={errorStyle}>
+              {errors.vehicleVerification}
+            </span>
+          )}
+
+          {rcVerification.error && (
+            <div
+              role="alert"
+              style={{
+                marginTop: '9px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: '#fff0ef',
+                color: '#b42318',
+                fontSize: '13px',
+              }}
+            >
+              {rcVerification.error}
+            </div>
+          )}
+
+          {isVerified && rcVerification.result && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '14px',
+                border: '1px solid #c9e7d3',
+                borderRadius: '10px',
+                background: '#f4fbf6',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  marginBottom: '12px',
+                }}
+              >
+                <strong style={{ color: '#176b43', fontSize: '14px' }}>
+                  Vehicle verification successful
+                </strong>
+
+                <span
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: '20px',
+                    background: '#e0f2e6',
+                    color: '#176b43',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                  }}
+                >
+                  RC VERIFIED
+                </span>
+              </div>
+
+              <div style={applicationGridStyle}>
+                {[
+                  [
+                    'Registration number',
+                    rcVerification.result.registrationNumber,
+                  ],
+                  ['Owner name', rcVerification.result.ownerName],
+                  ['Vehicle', rcVerification.result.vehicle],
+                  ['Fuel', rcVerification.result.fuel],
+                  ['State', rcVerification.result.state],
+                  ['RTO', rcVerification.result.rto],
+                  [
+                    'Insurance status',
+                    typeof rcVerification.result.insuranceValid === 'boolean'
+                      ? rcVerification.result.insuranceValid
+                        ? 'Valid according to provider'
+                        : 'Not valid according to provider'
+                      : 'Not available',
+                  ],
+                ]
+                  .filter(([, value]) =>
+                    value !== null &&
+                    value !== undefined &&
+                    String(value).trim() !== '',
+                  )
+                  .map(([label, value]) => (
+                    <div key={label} style={{ marginBottom: '9px' }}>
+                      <span
+                        style={{
+                          display: 'block',
+                          color: '#718278',
+                          fontSize: '11px',
+                          marginBottom: '3px',
+                        }}
+                      >
+                        {label}
+                      </span>
+
+                      <strong
+                        style={{
+                          color: '#263d31',
+                          fontSize: '13px',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {String(value)}
+                      </strong>
+                    </div>
+                  ))}
+              </div>
+
+              <p
+                style={{
+                  margin: '8px 0 0',
+                  fontSize: '11px',
+                  color: '#65776c',
+                }}
+              >
+                Vehicle information is provided by the RC verification
+                service. Please check the remaining application details
+                before continuing.
+              </p>
+            </div>
+          )}
+        </div>
+      )
+    }
+
     return (
       <ApplicationField
         key={field.name}
@@ -2648,4 +2970,3 @@ const sectionHeadingStyle = {
   flexDirection: 'column',
   gap: '5px',
 }
-
